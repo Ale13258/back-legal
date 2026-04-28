@@ -1,0 +1,48 @@
+{
+  "name": "back-legal",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "description": "Backend API: Node.js (Express) + Prisma + PostgreSQL. Blueprint: BACKEND_API_NODE_POSTGRES_AWS.md",
+  "scripts": {
+    "dev": "tsx watch src/main.ts",
+    "dev:worker:whatsapp": "tsx watch src/workers/notifications-whatsapp.worker.ts",
+    "build": "tsc",
+    "start": "node dist/main.js",
+    "start:worker:whatsapp": "node dist/workers/notifications-whatsapp.worker.js",
+    "db:generate": "prisma generate",
+    "db:migrate": "prisma migrate dev",
+    "db:deploy": "prisma migrate deploy",
+    "db:studio": "prisma studio",
+    "db:seed": "tsx prisma/seed.ts",
+    "db:backfill-mora": "tsx prisma/backfill-mora.ts",
+    "notifications:schedules:run": "tsx src/scripts/run-notification-schedules.ts",
+    "test": "tsx --test src/**/*.test.ts"
+  },
+  "prisma": {
+    "seed": "tsx prisma/seed.ts"
+  },
+  "dependencies": {
+    "@prisma/client": "^6.4.1",
+    "argon2": "^0.44.0",
+    "bullmq": "^5.73.5",
+    "cors": "^2.8.6",
+    "dotenv": "^17.3.1",
+    "express": "^4.21.2",
+    "ioredis": "^5.10.1",
+    "jsonwebtoken": "^9.0.3",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.19",
+    "@types/express": "^4.17.21",
+    "@types/jsonwebtoken": "^9.0.10",
+    "@types/node": "^22.13.10",
+    "prisma": "^6.4.1",
+    "tsx": "^4.19.3",
+    "typescript": "^5.8.2"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

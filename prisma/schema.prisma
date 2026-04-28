@@ -1,0 +1,308 @@
+// Alineado a BACKEND_API_NODE_POSTGRES_AWS.md (sección 7.1 + nombres de tablas §6.6)
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  admin
+  cliente
+
+  @@map("role_enum")
+}
+
+enum TipoPersona {
+  natural
+  juridica
+
+  @@map("tipo_persona_enum")
+}
+
+enum TipoPropiedad {
+  apartamento
+  local
+  parqueadero
+  otro
+
+  @@map("tipo_propiedad_enum")
+}
+
+enum EstadoPago {
+  pendiente
+  parcial
+  pagado
+  vencido
+
+  @@map("estado_pago_enum")
+}
+
+enum ConceptoPago {
+  administracion
+  intereses
+  extraordinaria
+  otros
+
+  @@map("concepto_pago_enum")
+}
+
+enum TipoCuenta {
+  juridica
+  extrajudicial
+  acuerdo_de_pago
+
+  @@map("tipo_cuenta_enum")
+}
+
+enum EstadoCuenta {
+  activa
+  cerrada
+  en_proceso
+
+  @@map("estado_cuenta_enum")
+}
+
+enum EtapaProceso {
+  inicial
+  notificacion
+  conciliacion
+  demanda
+  ejecucion
+
+  @@map("etapa_proceso_enum")
+}
+
+enum NotificationChannel {
+  whatsapp
+
+  @@map("notification_channel_enum")
+}
+
+enum NotificationStage {
+  d_minus_3
+  d_day_0
+  d_plus_3
+
+  @@map("notification_stage_enum")
+}
+
+enum NotificationStatus {
+  queued
+  processing
+  sent
+  delivered
+  read
+  failed
+  cancelled
+
+  @@map("notification_status_enum")
+}
+
+model Cliente {
+  id            String      @id @default(uuid())
+  nombre        String
+  tipo_persona  TipoPersona
+  documento     String      @unique
+  telefono      String?
+  email         String      @unique
+  direccion     String?
+  observaciones String?
+  is_active     Boolean     @default(true)
+
+  propiedades Propiedad[]
+  cuentas     Cuenta[]
+  usuarios    Usuario[]
+
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  @@map("clientes")
+}
+
+model Usuario {
+  id             String    @id @default(uuid())
+  email          String    @unique
+  password_hash  String
+  role           Role
+  cliente_id     String?
+  cliente        Cliente?  @relation(fields: [cliente_id], references: [id])
+
+  refresh_tokens RefreshToken[]
+
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  @@map("usuarios")
+}
+
+model Propiedad {
+  id              String         @id @default(uuid())
+  cliente_id      String
+  cliente         Cliente        @relation(fields: [cliente_id], references: [id])
+  tipo_propiedad  TipoPropiedad
+  identificador   String
+  direccion       String?
+  notas           String?
+
+  monto_a_la_fecha Decimal @default(0) @db.Decimal(14, 2)
+
+  /// Máximo de dias_en_mora en historial de esta propiedad (denormalizado para listados).
+  edad_mora_dias Int?
+  /// MIN(fecha_inicio_cobro) del historial (no null).
+  fecha_inicio_cobro DateTime? @db.Date
+  /// MAX(fecha_fin_cobro) del historial (no null).
+  fecha_fin_cobro    DateTime? @db.Date
+
+  historial_pagos HistorialPago[]
+  gestiones       Gestion[]
+  cuentas         Cuenta[]
+  notification_sequences NotificationSequence[]
+  notification_events    NotificationEvent[]
+
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  @@index([cliente_id], map: "idx_propiedades_cliente_id")
+  @@map("propiedades")
+}
+
+model HistorialPago {
+  id           String    @id @default(uuid())
+  propiedad_id String
+  propiedad    Propiedad @relation(fields: [propiedad_id], references: [id])
+
+  periodo          String        @db.Char(7)
+  concepto         ConceptoPago
+  valor_cobrado    Decimal       @db.Decimal(14, 2)
+  valor_pagado     Decimal       @db.Decimal(14, 2)
+  fecha_pago       DateTime?     @db.Date
+  estado_pago      EstadoPago
+  monto_a_la_fecha Decimal       @db.Decimal(14, 2)
+
+  /// Calculado en servidor; ver BACKEND_API §6.5.1 y domain/mora.ts.
+  dias_en_mora Int?
+  fecha_inicio_cobro DateTime? @db.Date
+  fecha_fin_cobro    DateTime? @db.Date
+
+  observaciones String?
+
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  @@index([propiedad_id, periodo], map: "idx_historial_propiedad_periodo")
+  @@map("historial_pagos")
+}
+
+model Cuenta {
+  id            String    @id @default(uuid())
+  cliente_id    String
+  cliente       Cliente   @relation(fields: [cliente_id], references: [id])
+  propiedad_id  String?
+  propiedad     Propiedad? @relation(fields: [propiedad_id], references: [id])
+
+  numero_cuenta String       @unique
+  tipo          TipoCuenta
+  estado        EstadoCuenta
+  etapa_proceso EtapaProceso
+
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  @@index([cliente_id], map: "idx_cuentas_cliente_id")
+  @@map("cuentas")
+}
+
+model Gestion {
+  id           String    @id @default(uuid())
+  propiedad_id String
+  propiedad    Propiedad @relation(fields: [propiedad_id], references: [id])
+
+  fecha       DateTime @db.Date
+  estado      String
+  descripcion String
+
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  @@index([propiedad_id, fecha])
+  @@map("gestiones")
+}
+
+model RefreshToken {
+  id         String   @id @default(uuid())
+  usuario_id String
+  usuario    Usuario  @relation(fields: [usuario_id], references: [id], onDelete: Cascade)
+
+  token_hash           String
+  expires_at           DateTime
+  revoked_at           DateTime?
+  replaced_by_token_id String?
+
+  created_at DateTime @default(now())
+
+  @@index([usuario_id], map: "idx_refresh_tokens_usuario")
+  @@map("refresh_tokens")
+}
+
+model NotificationSequence {
+  id           String              @id @default(uuid())
+  propiedad_id String
+  propiedad    Propiedad           @relation(fields: [propiedad_id], references: [id])
+  channel      NotificationChannel @default(whatsapp)
+  due_date     DateTime            @db.Date
+  is_active    Boolean             @default(true)
+  created_at   DateTime            @default(now())
+  updated_at   DateTime            @updatedAt
+
+  events NotificationEvent[]
+
+  @@index([propiedad_id, due_date], map: "idx_notification_sequences_propiedad_due")
+  @@map("notification_sequences")
+}
+
+model NotificationEvent {
+  id                  String             @id @default(uuid())
+  sequence_id         String
+  sequence            NotificationSequence @relation(fields: [sequence_id], references: [id])
+  propiedad_id        String
+  propiedad           Propiedad          @relation(fields: [propiedad_id], references: [id])
+  stage               NotificationStage
+  channel             NotificationChannel @default(whatsapp)
+  status              NotificationStatus @default(queued)
+  scheduled_for       DateTime
+  sent_at             DateTime?
+  delivered_at        DateTime?
+  read_at             DateTime?
+  provider_message_id String?
+  error_code          String?
+  error_message       String?
+  idempotency_key     String             @unique
+  created_at          DateTime           @default(now())
+  updated_at          DateTime           @updatedAt
+
+  webhook_events NotificationWebhookEvent[]
+
+  @@index([propiedad_id, created_at(sort: Desc)], map: "idx_notification_events_propiedad_created")
+  @@index([status, scheduled_for], map: "idx_notification_events_status_scheduled")
+  @@index([provider_message_id], map: "idx_notification_events_provider_message")
+  @@map("notification_events")
+}
+
+model NotificationWebhookEvent {
+  id                  String   @id @default(uuid())
+  notification_event_id String?
+  notification_event  NotificationEvent? @relation(fields: [notification_event_id], references: [id])
+  provider_message_id String
+  event_type          String
+  event_time          DateTime
+  payload             Json?
+  created_at          DateTime @default(now())
+
+  @@unique([provider_message_id, event_type, event_time], map: "uq_notification_webhook_dedupe")
+  @@index([provider_message_id], map: "idx_notification_webhook_provider_message")
+  @@map("notification_webhook_events")
+}

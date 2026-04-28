@@ -1,0 +1,15 @@
+-- AlterTable
+ALTER TABLE "notification_events" ALTER COLUMN "scheduled_for" SET DATA TYPE TIMESTAMP(3),
+ALTER COLUMN "sent_at" SET DATA TYPE TIMESTAMP(3),
+ALTER COLUMN "delivered_at" SET DATA TYPE TIMESTAMP(3),
+ALTER COLUMN "read_at" SET DATA TYPE TIMESTAMP(3),
+ALTER COLUMN "created_at" SET DATA TYPE TIMESTAMP(3),
+ALTER COLUMN "updated_at" SET DATA TYPE TIMESTAMP(3);
+
+-- AlterTable
+ALTER TABLE "notification_sequences" ALTER COLUMN "created_at" SET DATA TYPE TIMESTAMP(3),
+ALTER COLUMN "updated_at" SET DATA TYPE TIMESTAMP(3);
+
+-- AlterTable
+ALTER TABLE "notification_webhook_events" ALTER COLUMN "event_time" SET DATA TYPE TIMESTAMP(3),
+ALTER COLUMN "created_at" SET DATA TYPE TIMESTAMP(3);

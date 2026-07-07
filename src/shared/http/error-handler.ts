@@ -80,6 +80,22 @@ export function errorHandler(
         request_id: req.requestId ?? "unknown",
       });
     }
+    if (err.code === "P2003") {
+      return res.status(409).json({
+        code: "CONFLICT",
+        message: "No se puede completar la operacion por registros asociados",
+        details: err.meta,
+        request_id: req.requestId ?? "unknown",
+      });
+    }
+    if (err.code === "P2025") {
+      return res.status(404).json({
+        code: "NOT_FOUND",
+        message: "Registro no encontrado",
+        details: err.meta,
+        request_id: req.requestId ?? "unknown",
+      });
+    }
   }
 
   console.error("Unhandled error", {

@@ -146,16 +146,28 @@ export class PropiedadesPrismaRepository implements PropiedadesPersistencePort {
   async deletePropiedadCascade(id: string): Promise<void> {
     try {
       await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+        await tx.paymentReminderEmail.deleteMany({ where: { propiedad_id: id } });
         await tx.historialPago.deleteMany({ where: { propiedad_id: id } });
         await tx.gestion.deleteMany({ where: { propiedad_id: id } });
+        // La cuenta pertenece al cliente; solo se desasocia de la propiedad
+        // (propiedad_id es opcional) para no destruir datos financieros.
+        await tx.cuenta.updateMany({
+          where: { propiedad_id: id },
+          data: { propiedad_id: null },
+        });
         await tx.propiedad.delete({ where: { id } });
       });
     } catch (error) {
-      // @ts-ignore
-      const KnownError = (Prisma as any).PrismaClientKnownRequestError;
-      if (KnownError && error instanceof KnownError) {
-        if ((error as any).code === "P2025") {
+      if (error instanceof Prisma.PrismaClientKnownRequestError) {
+        if (error.code === "P2025") {
           throw new ApiError(404, "NOT_FOUND", "Propiedad no encontrada");
+        }
+        if (error.code === "P2003") {
+          throw new ApiError(
+            409,
+            "CONFLICT",
+            "No se puede eliminar la propiedad porque tiene registros asociados",
+          );
         }
       }
       throw error;

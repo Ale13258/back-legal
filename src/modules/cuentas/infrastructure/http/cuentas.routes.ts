@@ -59,3 +59,12 @@ cuentasRouter.patch("/:id", requireRole("admin"), async (req, res, next) => {
     next(error);
   }
 });
+
+cuentasRouter.delete("/:id", requireRole("admin"), async (req, res, next) => {
+  try {
+    await prisma.cuenta.delete({ where: { id: req.params.id } });
+    res.status(204).send();
+  } catch (error) {
+    next(error);
+  }
+});

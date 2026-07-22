@@ -60,8 +60,16 @@ cuentasRouter.patch("/:id", requireRole("admin"), async (req, res, next) => {
   }
 });
 
+
 cuentasRouter.delete("/:id", requireRole("admin"), async (req, res, next) => {
   try {
+    const existing = await prisma.cuenta.findUnique({
+      where: { id: req.params.id },
+    });
+    if (!existing) {
+      throw new ApiError(404, "NOT_FOUND", "Cuenta no encontrada");
+    }
+
     await prisma.cuenta.delete({ where: { id: req.params.id } });
     res.status(204).send();
   } catch (error) {

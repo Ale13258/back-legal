@@ -4,6 +4,7 @@ import { ApiError } from "../../../../shared/http/error-handler.js";
 import type { EmailSenderPort, SendEmailInput } from "../../domain/ports/email-sender.port.js";
 import type {
   PaymentReminderEmailRecord,
+  PaymentReminderEmailWithBody,
   PaymentRemindersPersistencePort,
   PropiedadForReminder,
 } from "../../domain/ports/payment-reminders-persistence.port.js";
@@ -28,8 +29,9 @@ function basePropiedad(overrides: Partial<PropiedadForReminder> = {}): Propiedad
 }
 
 function createMocks() {
-  const logs: PaymentReminderEmailRecord[] = [];
+  const logs: PaymentReminderEmailWithBody[] = [];
   const queuedBodies: { body_html: string; body_text: string }[] = [];
+  const gestiones: { email_reminder_id: string; descripcion: string; fecha: Date }[] = [];
   let propiedad: PropiedadForReminder | null = basePropiedad();
   let lastSendInput: SendEmailInput | null = null;
 
@@ -39,33 +41,45 @@ function createMocks() {
     },
     async createQueued(input) {
       queuedBodies.push({ body_html: input.body_html, body_text: input.body_text });
-      const row: PaymentReminderEmailRecord = {
+      const row: PaymentReminderEmailWithBody = {
         id: "log-1",
         propiedad_id: input.propiedad_id,
         cliente_email: input.cliente_email,
+        extra_recipients: input.extra_recipients,
         subject: input.subject,
         status: "queued",
         provider_id: null,
         error_message: null,
         sent_at: null,
         created_at: new Date("2026-05-21T12:00:00.000Z"),
+        gestion_id: null,
+        body_html: input.body_html,
+        body_text: input.body_text,
       };
       logs.push(row);
       return row;
     },
-    async markSent(input) {
-      const row = {
+    async markSentWithGestion(input) {
+      gestiones.push({
+        email_reminder_id: input.id,
+        descripcion: input.descripcion,
+        fecha: input.sent_at,
+      });
+      const row: PaymentReminderEmailWithBody = {
         ...logs[0],
         status: "sent",
         provider_id: input.provider_id,
         sent_at: input.sent_at,
         error_message: null,
+        gestion_id: "gestion-1",
+        body_html: queuedBodies[0]?.body_html ?? null,
+        body_text: queuedBodies[0]?.body_text ?? null,
       };
       logs[0] = row;
       return row;
     },
     async markFailed(input) {
-      const row = {
+      const row: PaymentReminderEmailWithBody = {
         ...logs[0],
         status: "failed",
         error_message: input.error_message,
@@ -73,12 +87,11 @@ function createMocks() {
       logs[0] = row;
       return row;
     },
+    async findById(id: string) {
+      return logs.find((row) => row.id === id) ?? null;
+    },
     async listByPropiedad() {
-      return logs.map((row) => ({
-        ...row,
-        body_html: queuedBodies[0]?.body_html ?? null,
-        body_text: queuedBodies[0]?.body_text ?? null,
-      }));
+      return logs;
     },
   };
 
@@ -97,6 +110,9 @@ function createMocks() {
     },
     getLogs() {
       return logs;
+    },
+    getGestiones() {
+      return gestiones;
     },
     getQueuedBodies() {
       return queuedBodies;
@@ -127,8 +143,12 @@ describe("SendPaymentReminderEmailUseCase", () => {
 
     assert.equal(result.status, "sent");
     assert.equal(result.cliente_email, "cobro@example.com");
+    assert.deepEqual(result.extra_recipients, []);
     assert.equal(result.provider_id, "<test@mail>");
     assert.equal(result.subject, "Recordatorio de pago - APT-101");
+    assert.equal(result.gestion_id, "gestion-1");
+    assert.equal(result.body_html, sampleBodyHtml);
+    assert.equal(result.body_text, sampleBodyText);
 
     const sent = mocks.getLastSendInput();
     assert.equal(sent?.html, sampleBodyHtml);
@@ -136,6 +156,12 @@ describe("SendPaymentReminderEmailUseCase", () => {
     assert.equal(sent?.to, "cobro@example.com");
     assert.ok(sent?.attachments && sent.attachments.length >= 4);
     assert.equal(sent.attachments[0]?.contentDisposition, "inline");
+
+    const gestiones = mocks.getGestiones();
+    assert.equal(gestiones.length, 1);
+    assert.equal(gestiones[0]?.email_reminder_id, "log-1");
+    assert.match(gestiones[0]?.descripcion ?? "", /Asunto: Recordatorio de pago - APT-101/);
+    assert.match(gestiones[0]?.descripcion ?? "", /Para: cobro@example.com/);
   });
 
   it("persiste body_html y body_text al encolar", async () => {
@@ -235,7 +261,7 @@ describe("SendPaymentReminderEmailUseCase", () => {
     );
   });
 
-  it("envía con asunto personalizado y destinatarios adicionales", async () => {
+  it("envía con asunto personalizado y destinatarios adicionales separados", async () => {
     const mocks = createMocks();
     const useCase = new SendPaymentReminderEmailUseCase({
       persistence: mocks.persistence,
@@ -250,14 +276,20 @@ describe("SendPaymentReminderEmailUseCase", () => {
 
     assert.equal(result.status, "sent");
     assert.equal(result.subject, "Pago pendiente APT-101");
-    assert.equal(result.cliente_email, "cobro@example.com, extra@example.com");
+    assert.equal(result.cliente_email, "cobro@example.com");
+    assert.deepEqual(result.extra_recipients, ["extra@example.com"]);
+    assert.equal(result.gestion_id, "gestion-1");
 
     const sent = mocks.getLastSendInput();
     assert.equal(sent?.subject, "Pago pendiente APT-101");
     assert.equal(sent?.to, "cobro@example.com, extra@example.com");
+
+    const queued = mocks.getLogs()[0] as PaymentReminderEmailRecord;
+    assert.equal(queued.cliente_email, "cobro@example.com");
+    assert.deepEqual(queued.extra_recipients, ["extra@example.com"]);
   });
 
-  it("marca failed y relanza si el envío SMTP falla", async () => {
+  it("marca failed, no crea gestión y relanza si el envío SMTP falla", async () => {
     const mocks = createMocks();
     const failingSender: EmailSenderPort = {
       async send() {
@@ -274,5 +306,6 @@ describe("SendPaymentReminderEmailUseCase", () => {
       (err: unknown) => err instanceof ApiError && err.status === 502,
     );
     assert.equal(mocks.getLogs()[0]?.status, "failed");
+    assert.equal(mocks.getGestiones().length, 0);
   });
 });

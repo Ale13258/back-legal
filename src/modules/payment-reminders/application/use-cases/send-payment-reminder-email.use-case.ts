@@ -1,24 +1,14 @@
 import { ApiError } from "../../../../shared/http/error-handler.js";
 import { getGmailFromAddress } from "../../../../shared/infrastructure/email/gmail-transport.js";
+import {
+  mergeRecipientList,
+  normalizeReminderRecipients,
+} from "../../domain/normalize-recipients.js";
 import { assertSafeReminderEmailBody } from "../../domain/validate-email-body.js";
 import type { EmailSenderPort, SendEmailAttachment } from "../../domain/ports/email-sender.port.js";
 import type { PaymentRemindersPersistencePort } from "../../domain/ports/payment-reminders-persistence.port.js";
 import { embedReminderBrandingInHtml } from "../../infrastructure/email/embed-reminder-email-assets.js";
 import { getPaymentReminderEmailAttachments } from "../../infrastructure/email/payment-reminder-email-assets.js";
-
-function mergeRecipients(primary: string, extras?: string[]): string {
-  const seen = new Set<string>();
-  const list: string[] = [];
-  for (const raw of [primary, ...(extras ?? [])]) {
-    const trimmed = raw.trim();
-    if (!trimmed) continue;
-    const key = trimmed.toLowerCase();
-    if (seen.has(key)) continue;
-    seen.add(key);
-    list.push(trimmed);
-  }
-  return list.join(", ");
-}
 
 export class SendPaymentReminderEmailUseCase {
   constructor(
@@ -66,12 +56,14 @@ export class SendPaymentReminderEmailUseCase {
 
     const subject =
       input.subject?.trim() || `Recordatorio de pago - ${propiedad.identificador}`;
-    const recipients = mergeRecipients(to, input.extra_recipients);
+    const recipients = normalizeReminderRecipients(to, input.extra_recipients);
+    const smtpTo = mergeRecipientList(recipients.cliente_email, recipients.extra_recipients);
     const html = embedReminderBrandingInHtml(input.body_html);
 
     const log = await this.deps.persistence.createQueued({
       propiedad_id: propiedad.id,
-      cliente_email: recipients,
+      cliente_email: recipients.cliente_email,
+      extra_recipients: recipients.extra_recipients,
       subject,
       body_html: html,
       body_text: input.body_text,
@@ -97,17 +89,20 @@ export class SendPaymentReminderEmailUseCase {
     try {
       const sent = await this.deps.emailSender.send({
         from: getGmailFromAddress(),
-        to: recipients,
+        to: smtpTo,
         subject,
         html,
         text: input.body_text,
         attachments: [...brandedAttachments, ...userAttachments],
       });
 
-      return await this.deps.persistence.markSent({
+      const sentAt = new Date();
+      return await this.deps.persistence.markSentWithGestion({
         id: log.id,
         provider_id: sent.provider_id,
-        sent_at: new Date(),
+        sent_at: sentAt,
+        propiedad_id: propiedad.id,
+        descripcion: `Recordatorio de pago por correo — Asunto: ${subject} — Para: ${recipients.cliente_email}`,
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : "Error al enviar correo";

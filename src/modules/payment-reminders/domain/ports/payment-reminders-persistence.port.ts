@@ -11,12 +11,14 @@ export type PaymentReminderEmailRecord = {
   id: string;
   propiedad_id: string;
   cliente_email: string;
+  extra_recipients: string[];
   subject: string;
   status: string;
   provider_id: string | null;
   error_message: string | null;
   sent_at: Date | null;
   created_at: Date;
+  gestion_id: string | null;
 };
 
 export type PaymentReminderEmailWithBody = PaymentReminderEmailRecord & {
@@ -29,18 +31,22 @@ export interface PaymentRemindersPersistencePort {
   createQueued(input: {
     propiedad_id: string;
     cliente_email: string;
+    extra_recipients: string[];
     subject: string;
     body_html: string;
     body_text: string;
   }): Promise<PaymentReminderEmailRecord>;
-  markSent(input: {
+  markSentWithGestion(input: {
     id: string;
     provider_id: string;
     sent_at: Date;
-  }): Promise<PaymentReminderEmailRecord>;
+    propiedad_id: string;
+    descripcion: string;
+  }): Promise<PaymentReminderEmailWithBody>;
   markFailed(input: {
     id: string;
     error_message: string;
   }): Promise<PaymentReminderEmailRecord>;
+  findById(id: string): Promise<PaymentReminderEmailWithBody | null>;
   listByPropiedad(propiedadId: string, limit: number): Promise<PaymentReminderEmailWithBody[]>;
 }

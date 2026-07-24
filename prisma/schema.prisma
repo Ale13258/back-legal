@@ -162,18 +162,22 @@ model Propiedad {
 }
 
 model PaymentReminderEmail {
-  id            String    @id @default(uuid())
-  propiedad_id  String
-  propiedad     Propiedad @relation(fields: [propiedad_id], references: [id])
-  cliente_email String
-  subject       String
-  body_html     String?   @db.Text
-  body_text     String?   @db.Text
-  status        String
-  provider_id   String?
-  error_message String?
-  sent_at       DateTime?
-  created_at    DateTime  @default(now())
+  id               String    @id @default(uuid())
+  propiedad_id     String
+  propiedad        Propiedad @relation(fields: [propiedad_id], references: [id])
+  cliente_email    String
+  /// Destinatarios adicionales (cliente_email = principal).
+  extra_recipients String[]  @default([])
+  subject          String
+  body_html        String?   @db.Text
+  body_text        String?   @db.Text
+  status           String
+  provider_id      String?
+  error_message    String?
+  sent_at          DateTime?
+  created_at       DateTime  @default(now())
+
+  gestion Gestion?
 
   @@index([propiedad_id, created_at(sort: Desc)], map: "idx_payment_reminder_emails_propiedad_created")
   @@map("payment_reminder_emails")
@@ -230,9 +234,14 @@ model Gestion {
   propiedad_id String
   propiedad    Propiedad @relation(fields: [propiedad_id], references: [id])
 
-  fecha       DateTime @db.Date
+  /// Instant UTC (timestamptz). No date-only.
+  fecha       DateTime
   estado      String
   descripcion String
+  /// p.ej. "email_reminder" para gestiones auto-creadas al enviar recordatorio.
+  origen      String?
+  email_reminder_id String?               @unique
+  email_reminder    PaymentReminderEmail? @relation(fields: [email_reminder_id], references: [id], onDelete: Restrict)
 
   created_at DateTime @default(now())
   updated_at DateTime @updatedAt

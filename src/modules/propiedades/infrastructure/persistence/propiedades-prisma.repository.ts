@@ -41,6 +41,26 @@ function fechaPagoFromInput(value: string | null | undefined): Date | null {
   return ymdToUtcNoon(value, "fecha_pago");
 }
 
+const GESTION_ORIGEN_EMAIL_REMINDER = "email_reminder";
+
+function assertGestionMutable(gestion: { origen: string | null }) {
+  if (gestion.origen === GESTION_ORIGEN_EMAIL_REMINDER) {
+    throw new ApiError(
+      403,
+      "GESTION_READONLY",
+      "Las gestiones creadas por recordatorio de correo no se pueden editar ni eliminar",
+    );
+  }
+}
+
+function parseGestionFecha(value: string): Date {
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) {
+    throw new ApiError(400, "VALIDATION_ERROR", "fecha inválida");
+  }
+  return d;
+}
+
 function mapPropiedad(row: {
   id: string;
   cliente_id: string;
@@ -254,9 +274,10 @@ export class PropiedadesPrismaRepository implements PropiedadesPersistencePort {
   async deletePropiedadCascade(id: string): Promise<void> {
     try {
       await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+        // Gestiones primero: FK Restrict desde gestiones.email_reminder_id → payment_reminder_emails
+        await tx.gestion.deleteMany({ where: { propiedad_id: id } });
         await tx.paymentReminderEmail.deleteMany({ where: { propiedad_id: id } });
         await tx.historialPago.deleteMany({ where: { propiedad_id: id } });
-        await tx.gestion.deleteMany({ where: { propiedad_id: id } });
         // La cuenta pertenece al cliente; solo se desasocia de la propiedad
         // (propiedad_id es opcional) para no destruir datos financieros.
         await tx.cuenta.updateMany({
@@ -438,7 +459,7 @@ export class PropiedadesPrismaRepository implements PropiedadesPersistencePort {
     return (await prisma.gestion.create({
       data: {
         propiedad_id: input.propiedadId,
-        fecha: new Date(input.fecha),
+        fecha: parseGestionFecha(input.fecha),
         estado: input.estado,
         descripcion: input.descripcion,
       },
@@ -456,11 +477,12 @@ export class PropiedadesPrismaRepository implements PropiedadesPersistencePort {
     if (!gestion || gestion.propiedad_id !== input.propiedadId) {
       throw new ApiError(404, "NOT_FOUND", "Gestion no encontrada para la propiedad");
     }
+    assertGestionMutable(gestion);
 
     return (await prisma.gestion.update({
       where: { id: input.gestionId },
       data: {
-        ...(input.fecha != null ? { fecha: new Date(input.fecha) } : {}),
+        ...(input.fecha != null ? { fecha: parseGestionFecha(input.fecha) } : {}),
         ...(input.estado != null ? { estado: input.estado } : {}),
         ...(input.descripcion != null ? { descripcion: input.descripcion } : {}),
       },
@@ -475,6 +497,7 @@ export class PropiedadesPrismaRepository implements PropiedadesPersistencePort {
     if (!gestion || gestion.propiedad_id !== input.propiedadId) {
       throw new ApiError(404, "NOT_FOUND", "Gestion no encontrada para la propiedad");
     }
+    assertGestionMutable(gestion);
 
     await prisma.gestion.delete({ where: { id: input.gestionId } });
   }

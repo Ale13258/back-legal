@@ -4,6 +4,8 @@ export type Gestion = {
   fecha: Date;
   estado: string;
   descripcion: string;
+  origen: string | null;
+  email_reminder_id: string | null;
   created_at: Date;
   updated_at: Date;
 };

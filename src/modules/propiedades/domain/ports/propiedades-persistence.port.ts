@@ -22,6 +22,14 @@ export type CobroFields = {
   cobro_email: string;
 };
 
+export type DeudorCobro = {
+  nombre: string;
+  tipo_persona: TipoPersona;
+  documento: string;
+  /** Al menos 1. cobro_email = emails[0]. */
+  emails: string[];
+};
+
 export type Propiedad = {
   id: string;
   cliente_id: string;
@@ -33,6 +41,8 @@ export type Propiedad = {
   cobro_tipo_persona: TipoPersona;
   cobro_documento: string;
   cobro_email: string;
+  /** Siempre len >= 1. cobro_* = proyección de deudores[0]. */
+  deudores: DeudorCobro[];
   monto_a_la_fecha: unknown; // Prisma Decimal (runtime) -> JSON compatible
   edad_mora_dias: number | null;
   fecha_inicio_cobro: Date | null;
@@ -88,10 +98,7 @@ export interface PropiedadesPersistencePort {
     notas?: string;
     saldo_inicial?: number;
     fecha_inicio_cobro?: string | null;
-    cobro_nombre: string;
-    cobro_tipo_persona: TipoPersona;
-    cobro_documento: string;
-    cobro_email: string;
+    deudores: DeudorCobro[];
   }): Promise<Propiedad>;
 
   updatePropiedad(input: {
@@ -101,6 +108,9 @@ export interface PropiedadesPersistencePort {
     direccion?: string;
     notas?: string;
     saldo_inicial?: number;
+    /** Replace completo del array; sincroniza cobro_* = deudores[0]. */
+    deudores?: DeudorCobro[];
+    /** Legacy: parchea deudores[0] + cobro_* si no viene deudores. */
     cobro_nombre?: string;
     cobro_tipo_persona?: TipoPersona;
     cobro_documento?: string;

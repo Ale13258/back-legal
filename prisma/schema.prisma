@@ -137,6 +137,8 @@ model Propiedad {
   cobro_tipo_persona TipoPersona
   cobro_documento    String
   cobro_email        String
+  /// Deudores de cobro (JSON: DeudorCobro[] con emails[]). cobro_* = deudores[0] / emails[0].
+  deudores           Json
 
   monto_a_la_fecha Decimal @default(0) @db.Decimal(14, 2)
 

@@ -15,6 +15,32 @@ import { DeleteHistorialPagoUseCase } from "../../application/use-cases/delete-h
 import { UpdateHistorialPagoUseCase } from "../../application/use-cases/update-historial-pago.use-case.js";
 import { UpdateGestionUseCase } from "../../application/use-cases/update-gestion.use-case.js";
 import { DeleteGestionUseCase } from "../../application/use-cases/delete-gestion.use-case.js";
+import {
+  deudorFromCobro,
+  findDuplicateDocumentoIndexes,
+  normalizeDeudores,
+} from "../../domain/deudores.js";
+import type { DeudorCobro } from "../../domain/ports/propiedades-persistence.port.js";
+
+const deudorCobroSchema = z.object({
+  nombre: z.string().trim().min(1),
+  tipo_persona: z.enum(["natural", "juridica"]),
+  documento: z.string().trim().min(1),
+  emails: z.array(z.string().trim().email()).min(1),
+});
+
+const deudoresSchema = z
+  .array(deudorCobroSchema)
+  .min(1)
+  .superRefine((items, ctx) => {
+    for (const i of findDuplicateDocumentoIndexes(items)) {
+      ctx.addIssue({
+        code: "custom",
+        message: "documento duplicado en la misma unidad",
+        path: [i, "documento"],
+      });
+    }
+  });
 
 const cobroFieldsSchema = z.object({
   cobro_nombre: z.string().trim().min(1),
@@ -40,28 +66,73 @@ const optionalYmdOrNull = z.preprocess(
   z.union([z.string().regex(/^\d{4}-\d{2}-\d{2}$/), z.null()]).optional(),
 );
 
-const propiedadCreateSchema = z
-  .object({
-    cliente_id: z.string().uuid(),
-    tipo_propiedad: z.enum([
-      "apartamento",
-      "oficina",
-      "local",
-      "casa",
-      "bodega",
-      "garaje",
-      "parqueadero",
-      "otro",
-    ]),
-    identificador: z.string().min(1),
-    direccion: z.string().optional(),
-    notas: z.string().optional(),
-    saldo_inicial: z.coerce.number().min(0).optional(),
-    fecha_inicio_cobro: optionalYmdOrNull,
-  })
-  .merge(cobroFieldsSchema);
+const propiedadBaseSchema = z.object({
+  cliente_id: z.string().uuid(),
+  tipo_propiedad: z.enum([
+    "apartamento",
+    "oficina",
+    "local",
+    "casa",
+    "bodega",
+    "garaje",
+    "parqueadero",
+    "otro",
+  ]),
+  identificador: z.string().min(1),
+  direccion: z.string().optional(),
+  notas: z.string().optional(),
+  saldo_inicial: z.coerce.number().min(0).optional(),
+  fecha_inicio_cobro: optionalYmdOrNull,
+  deudores: deudoresSchema.optional(),
+  cobro_nombre: z.string().trim().min(1).optional(),
+  cobro_tipo_persona: z.enum(["natural", "juridica"]).optional(),
+  cobro_documento: z.string().trim().min(1).optional(),
+  cobro_email: z.string().trim().email().optional(),
+});
 
-const propiedadPatchSchema = propiedadCreateSchema.omit({ cliente_id: true }).partial();
+const propiedadCreateSchema = propiedadBaseSchema.superRefine((data, ctx) => {
+  if (data.deudores && data.deudores.length >= 1) return;
+  const missing: Array<keyof typeof data> = [];
+  if (!data.cobro_nombre) missing.push("cobro_nombre");
+  if (!data.cobro_tipo_persona) missing.push("cobro_tipo_persona");
+  if (!data.cobro_documento) missing.push("cobro_documento");
+  if (!data.cobro_email) missing.push("cobro_email");
+  for (const path of missing) {
+    ctx.addIssue({
+      code: "custom",
+      message: "Requerido si no se envía deudores",
+      path: [path],
+    });
+  }
+});
+
+const propiedadPatchSchema = propiedadBaseSchema
+  .omit({ cliente_id: true })
+  .partial()
+  .superRefine((data, ctx) => {
+    if (data.deudores === undefined) return;
+    // deudores presente → replace; ya validado por deudoresSchema si no es undefined
+    if (data.deudores.length < 1) {
+      ctx.addIssue({
+        code: "custom",
+        message: "Se requiere al menos un deudor de cobro",
+        path: ["deudores"],
+      });
+    }
+  });
+
+function resolveDeudoresForCreate(dto: z.infer<typeof propiedadCreateSchema>): DeudorCobro[] {
+  if (dto.deudores && dto.deudores.length >= 1) {
+    return normalizeDeudores(dto.deudores);
+  }
+  const cobro = cobroFieldsSchema.parse({
+    cobro_nombre: dto.cobro_nombre,
+    cobro_tipo_persona: dto.cobro_tipo_persona,
+    cobro_documento: dto.cobro_documento,
+    cobro_email: dto.cobro_email,
+  });
+  return [deudorFromCobro(cobro)];
+}
 
 const historialCreateSchema = z
   .object({
@@ -143,6 +214,7 @@ propiedadesRouter.get("/:id", async (req, res, next) => {
 propiedadesRouter.post("/", requireRole("admin"), async (req, res, next) => {
   try {
     const dto = propiedadCreateSchema.parse(req.body);
+    const deudores = resolveDeudoresForCreate(dto);
     const created = await createPropiedadUseCase.execute({
       cliente_id: dto.cliente_id,
       tipo_propiedad: dto.tipo_propiedad,
@@ -150,10 +222,7 @@ propiedadesRouter.post("/", requireRole("admin"), async (req, res, next) => {
       direccion: dto.direccion,
       notas: dto.notas,
       saldo_inicial: dto.saldo_inicial,
-      cobro_nombre: dto.cobro_nombre,
-      cobro_tipo_persona: dto.cobro_tipo_persona,
-      cobro_documento: dto.cobro_documento,
-      cobro_email: dto.cobro_email,
+      deudores,
       fecha_inicio_cobro: dto.fecha_inicio_cobro,
     });
     res.status(201).json(created);
@@ -172,10 +241,11 @@ propiedadesRouter.patch("/:id", requireRole("admin"), async (req, res, next) => 
       direccion: dto.direccion,
       notas: dto.notas,
       saldo_inicial: dto.saldo_inicial,
-      cobro_nombre: dto.cobro_nombre,
-      cobro_tipo_persona: dto.cobro_tipo_persona,
-      cobro_documento: dto.cobro_documento,
-      cobro_email: dto.cobro_email,
+      deudores: dto.deudores ? normalizeDeudores(dto.deudores) : undefined,
+      cobro_nombre: dto.deudores ? undefined : dto.cobro_nombre,
+      cobro_tipo_persona: dto.deudores ? undefined : dto.cobro_tipo_persona,
+      cobro_documento: dto.deudores ? undefined : dto.cobro_documento,
+      cobro_email: dto.deudores ? undefined : dto.cobro_email,
       fecha_inicio_cobro: dto.fecha_inicio_cobro,
     });
     res.json(updated);

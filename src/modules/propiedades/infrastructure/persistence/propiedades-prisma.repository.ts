@@ -2,11 +2,18 @@ import { prisma } from "../../../../shared/infrastructure/prisma/prisma.client.j
 import { ApiError } from "../../../../shared/http/error-handler.js";
 import { Prisma } from "@prisma/client";
 import { getBusinessTodayYmd } from "../../domain/business-calendar.js";
+import {
+  cobroFromDeudor,
+  ensureDeudores,
+  normalizeDeudores,
+  patchPrimaryDeudor,
+} from "../../domain/deudores.js";
 import { computeDiasEnMora } from "../../domain/mora.js";
 import { refreshPropiedadMoraAggregates } from "./refresh-mora-aggregates.js";
 import { recomputeHistorialSaldosForPropiedad } from "./recompute-historial-saldos.js";
 import type {
   ConceptoPago,
+  DeudorCobro,
   EstadoPago,
   HistorialPago,
   PropiedadesPersistencePort,
@@ -34,22 +41,70 @@ function fechaPagoFromInput(value: string | null | undefined): Date | null {
   return ymdToUtcNoon(value, "fecha_pago");
 }
 
+function mapPropiedad(row: {
+  id: string;
+  cliente_id: string;
+  tipo_propiedad: TipoPropiedad;
+  identificador: string;
+  direccion: string | null;
+  notas: string | null;
+  cobro_nombre: string;
+  cobro_tipo_persona: TipoPersona;
+  cobro_documento: string;
+  cobro_email: string;
+  deudores: unknown;
+  monto_a_la_fecha: unknown;
+  edad_mora_dias: number | null;
+  fecha_inicio_cobro: Date | null;
+  fecha_fin_cobro: Date | null;
+  created_at: Date;
+  updated_at: Date;
+}): Propiedad {
+  const deudores = ensureDeudores(row.deudores, {
+    cobro_nombre: row.cobro_nombre,
+    cobro_tipo_persona: row.cobro_tipo_persona,
+    cobro_documento: row.cobro_documento,
+    cobro_email: row.cobro_email,
+  });
+  return {
+    id: row.id,
+    cliente_id: row.cliente_id,
+    tipo_propiedad: row.tipo_propiedad,
+    identificador: row.identificador,
+    direccion: row.direccion,
+    notas: row.notas,
+    cobro_nombre: row.cobro_nombre,
+    cobro_tipo_persona: row.cobro_tipo_persona,
+    cobro_documento: row.cobro_documento,
+    cobro_email: row.cobro_email,
+    deudores,
+    monto_a_la_fecha: row.monto_a_la_fecha,
+    edad_mora_dias: row.edad_mora_dias,
+    fecha_inicio_cobro: row.fecha_inicio_cobro,
+    fecha_fin_cobro: row.fecha_fin_cobro,
+    created_at: row.created_at,
+    updated_at: row.updated_at,
+  };
+}
+
 export class PropiedadesPrismaRepository implements PropiedadesPersistencePort {
   async listPropiedades(input: {
     cliente_id?: string | undefined;
     tipo_propiedad?: TipoPropiedad | undefined;
   }): Promise<Propiedad[]> {
-    return prisma.propiedad.findMany({
+    const rows = await prisma.propiedad.findMany({
       where: {
         ...(input.cliente_id ? { cliente_id: input.cliente_id } : {}),
         ...(input.tipo_propiedad ? { tipo_propiedad: input.tipo_propiedad } : {}),
       },
       orderBy: { created_at: "desc" },
-    }) as unknown as Propiedad[];
+    });
+    return rows.map((row) => mapPropiedad(row as Parameters<typeof mapPropiedad>[0]));
   }
 
   async getPropiedadById(id: string): Promise<Propiedad | null> {
-    return (await prisma.propiedad.findUnique({ where: { id } })) as unknown as Propiedad | null;
+    const row = await prisma.propiedad.findUnique({ where: { id } });
+    return row ? mapPropiedad(row as Parameters<typeof mapPropiedad>[0]) : null;
   }
 
   async createPropiedad(input: {
@@ -60,20 +115,24 @@ export class PropiedadesPrismaRepository implements PropiedadesPersistencePort {
     notas?: string | undefined;
     saldo_inicial?: number | undefined;
     fecha_inicio_cobro?: string | null | undefined;
-    cobro_nombre: string;
-    cobro_tipo_persona: TipoPersona;
-    cobro_documento: string;
-    cobro_email: string;
+    deudores: DeudorCobro[];
   }): Promise<Propiedad> {
     const cliente = await prisma.cliente.findUnique({ where: { id: input.cliente_id } });
     if (!cliente) {
       throw new ApiError(404, "NOT_FOUND", "Cliente no encontrado");
     }
 
-    const cobro_nombre = input.cobro_nombre.trim();
-    const cobro_documento = input.cobro_documento.trim();
-    const cobro_email = input.cobro_email.trim();
-    if (!cobro_nombre || !cobro_documento || !cobro_email) {
+    const deudores = normalizeDeudores(input.deudores);
+    if (deudores.length < 1 || deudores.some((d) => d.emails.length < 1)) {
+      throw new ApiError(
+        400,
+        "VALIDATION_ERROR",
+        "Se requiere al menos un deudor con un email de cobro",
+      );
+    }
+    const primary = deudores[0]!;
+    const cobro = cobroFromDeudor(primary);
+    if (!cobro.cobro_nombre || !cobro.cobro_documento || !cobro.cobro_email) {
       throw new ApiError(
         400,
         "VALIDATION_ERROR",
@@ -81,7 +140,7 @@ export class PropiedadesPrismaRepository implements PropiedadesPersistencePort {
       );
     }
 
-    return (await prisma.propiedad.create({
+    const created = await prisma.propiedad.create({
       data: {
         cliente_id: input.cliente_id,
         tipo_propiedad: input.tipo_propiedad,
@@ -89,13 +148,15 @@ export class PropiedadesPrismaRepository implements PropiedadesPersistencePort {
         direccion: input.direccion,
         notas: input.notas,
         monto_a_la_fecha: input.saldo_inicial ?? 0,
-        cobro_nombre,
-        cobro_tipo_persona: input.cobro_tipo_persona,
-        cobro_documento,
-        cobro_email,
+        cobro_nombre: cobro.cobro_nombre,
+        cobro_tipo_persona: cobro.cobro_tipo_persona,
+        cobro_documento: cobro.cobro_documento,
+        cobro_email: cobro.cobro_email,
+        deudores: deudores as unknown as Prisma.InputJsonValue,
         fecha_inicio_cobro: cobroDateFromInput(input.fecha_inicio_cobro),
       },
-    })) as unknown as Propiedad;
+    });
+    return mapPropiedad(created as Parameters<typeof mapPropiedad>[0]);
   }
 
   async updatePropiedad(input: {
@@ -105,6 +166,7 @@ export class PropiedadesPrismaRepository implements PropiedadesPersistencePort {
     direccion?: string | undefined;
     notas?: string | undefined;
     saldo_inicial?: number | undefined;
+    deudores?: DeudorCobro[] | undefined;
     cobro_nombre?: string | undefined;
     cobro_tipo_persona?: TipoPersona | undefined;
     cobro_documento?: string | undefined;
@@ -121,6 +183,7 @@ export class PropiedadesPrismaRepository implements PropiedadesPersistencePort {
       cobro_tipo_persona?: TipoPersona;
       cobro_documento?: string;
       cobro_email?: string;
+      deudores?: Prisma.InputJsonValue;
       fecha_inicio_cobro?: Date | null;
     } = {};
 
@@ -129,18 +192,63 @@ export class PropiedadesPrismaRepository implements PropiedadesPersistencePort {
     if (input.direccion !== undefined) data.direccion = input.direccion;
     if (input.notas !== undefined) data.notas = input.notas;
     if (input.saldo_inicial !== undefined) data.monto_a_la_fecha = input.saldo_inicial;
-    if (input.cobro_nombre !== undefined) data.cobro_nombre = input.cobro_nombre;
-    if (input.cobro_tipo_persona !== undefined) data.cobro_tipo_persona = input.cobro_tipo_persona;
-    if (input.cobro_documento !== undefined) data.cobro_documento = input.cobro_documento;
-    if (input.cobro_email !== undefined) data.cobro_email = input.cobro_email;
     if (input.fecha_inicio_cobro !== undefined) {
       data.fecha_inicio_cobro = cobroDateFromInput(input.fecha_inicio_cobro);
     }
 
-    return (await prisma.propiedad.update({
+    if (input.deudores !== undefined) {
+      const deudores = normalizeDeudores(input.deudores);
+      if (deudores.length < 1 || deudores.some((d) => d.emails.length < 1)) {
+        throw new ApiError(
+          400,
+          "VALIDATION_ERROR",
+          "Se requiere al menos un deudor con un email de cobro",
+        );
+      }
+      const cobro = cobroFromDeudor(deudores[0]!);
+      data.deudores = deudores as unknown as Prisma.InputJsonValue;
+      data.cobro_nombre = cobro.cobro_nombre;
+      data.cobro_tipo_persona = cobro.cobro_tipo_persona;
+      data.cobro_documento = cobro.cobro_documento;
+      data.cobro_email = cobro.cobro_email;
+    } else {
+      const hasCobroPatch =
+        input.cobro_nombre !== undefined ||
+        input.cobro_tipo_persona !== undefined ||
+        input.cobro_documento !== undefined ||
+        input.cobro_email !== undefined;
+
+      if (hasCobroPatch) {
+        const existing = await prisma.propiedad.findUnique({ where: { id: input.id } });
+        if (!existing) {
+          throw new ApiError(404, "NOT_FOUND", "Propiedad no encontrada");
+        }
+        const currentDeudores = ensureDeudores(existing.deudores, {
+          cobro_nombre: existing.cobro_nombre,
+          cobro_tipo_persona: existing.cobro_tipo_persona,
+          cobro_documento: existing.cobro_documento,
+          cobro_email: existing.cobro_email,
+        });
+        const nextDeudores = patchPrimaryDeudor(currentDeudores, {
+          cobro_nombre: input.cobro_nombre,
+          cobro_tipo_persona: input.cobro_tipo_persona,
+          cobro_documento: input.cobro_documento,
+          cobro_email: input.cobro_email,
+        });
+        const cobro = cobroFromDeudor(nextDeudores[0]!);
+        data.deudores = nextDeudores as unknown as Prisma.InputJsonValue;
+        data.cobro_nombre = cobro.cobro_nombre;
+        data.cobro_tipo_persona = cobro.cobro_tipo_persona;
+        data.cobro_documento = cobro.cobro_documento;
+        data.cobro_email = cobro.cobro_email;
+      }
+    }
+
+    const updated = await prisma.propiedad.update({
       where: { id: input.id },
       data,
-    })) as unknown as Propiedad;
+    });
+    return mapPropiedad(updated as Parameters<typeof mapPropiedad>[0]);
   }
 
   async deletePropiedadCascade(id: string): Promise<void> {

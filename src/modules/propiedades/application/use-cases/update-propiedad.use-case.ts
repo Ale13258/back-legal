@@ -1,4 +1,5 @@
 import type {
+  DeudorCobro,
   PropiedadesPersistencePort,
   Propiedad,
   TipoPersona,
@@ -15,6 +16,7 @@ export class UpdatePropiedadUseCase {
     direccion?: string;
     notas?: string;
     saldo_inicial?: number;
+    deudores?: DeudorCobro[];
     cobro_nombre?: string;
     cobro_tipo_persona?: TipoPersona;
     cobro_documento?: string;

@@ -1,27 +1,73 @@
 import "dotenv/config";
 import argon2 from "argon2";
-import { PrismaClient } from "@prisma/client";
+import { PrismaClient, type Role } from "@prisma/client";
 
 const prisma = new PrismaClient();
 
-const DEFAULT_ADMINS = [
+const LEGALTECH_TENANT = {
+  nombre: "LegalTech",
+  tipo_persona: "juridica" as const,
+  documento: "900000000-0",
+  email: "tenant@legaltech.com",
+  observaciones: "Tenant SaaS raíz (Fase 1–2)",
+};
+
+const DEFAULT_STAFF: Array<{ email: string; password: string; role: Role }> = [
   {
     email: process.env.SEED_ADMIN_EMAIL || "admin@legaltech.com",
     password: process.env.SEED_ADMIN_PASSWORD || "admin123",
+    role: "super_admin",
   },
-  { email: "operador@legaltech.com", password: "admin123" },
-  { email: "gestor@legaltech.com", password: "admin123" },
-] as const;
+  { email: "operador@legaltech.com", password: "admin123", role: "analista_legal" },
+  { email: "gestor@legaltech.com", password: "admin123", role: "abogada_junior" },
+];
+
+async function ensureLegalTechTenant() {
+  const existing = await prisma.cliente.findFirst({
+    where: {
+      OR: [{ email: LEGALTECH_TENANT.email }, { documento: LEGALTECH_TENANT.documento }],
+    },
+  });
+  if (existing) {
+    return existing;
+  }
+  return prisma.cliente.create({
+    data: {
+      ...LEGALTECH_TENANT,
+      is_active: true,
+    },
+  });
+}
 
 async function main() {
-  for (const admin of DEFAULT_ADMINS) {
-    const password_hash = await argon2.hash(admin.password);
+  const tenant = await ensureLegalTechTenant();
+  console.log(`Tenant LegalTech listo: ${tenant.email} (${tenant.id})`);
+
+  for (const staff of DEFAULT_STAFF) {
+    const password_hash = await argon2.hash(staff.password);
     await prisma.usuario.upsert({
-      where: { email: admin.email },
-      update: { password_hash, role: "admin", cliente_id: null },
-      create: { email: admin.email, password_hash, role: "admin", cliente_id: null },
+      where: { email: staff.email },
+      update: {
+        password_hash,
+        role: staff.role,
+        cliente_id: null,
+        is_active: true,
+        activated_at: new Date(),
+        activation_token_hash: null,
+        activation_expires_at: null,
+      },
+      create: {
+        email: staff.email,
+        password_hash,
+        role: staff.role,
+        cliente_id: null,
+        is_active: true,
+        activated_at: new Date(),
+        activation_token_hash: null,
+        activation_expires_at: null,
+      },
     });
-    console.log(`Admin seed listo: ${admin.email}`);
+    console.log(`Staff seed listo: ${staff.email} (${staff.role})`);
   }
 }
 

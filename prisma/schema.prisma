@@ -9,7 +9,9 @@ datasource db {
 }
 
 enum Role {
-  admin
+  super_admin
+  analista_legal
+  abogada_junior
   cliente
 
   @@map("role_enum")
@@ -22,7 +24,8 @@ enum TipoPersona {
   @@map("tipo_persona_enum")
 }
 
-enum TipoPropiedad {
+/// Tipo de cuenta de cartera (ex tipo_propiedad): inmueble u otro.
+enum TipoCuenta {
   apartamento
   oficina
   local
@@ -32,7 +35,7 @@ enum TipoPropiedad {
   parqueadero
   otro
 
-  @@map("tipo_propiedad_enum")
+  @@map("tipo_cuenta_enum")
 }
 
 enum EstadoPago {
@@ -53,20 +56,20 @@ enum ConceptoPago {
   @@map("concepto_pago_enum")
 }
 
-enum TipoCuenta {
+enum TipoProcesoLegal {
   juridica
   extrajudicial
   acuerdo_de_pago
 
-  @@map("tipo_cuenta_enum")
+  @@map("tipo_proceso_legal_enum")
 }
 
-enum EstadoCuenta {
+enum EstadoProcesoLegal {
   activa
   cerrada
   en_proceso
 
-  @@map("estado_cuenta_enum")
+  @@map("estado_proceso_legal_enum")
 }
 
 enum EtapaProceso {
@@ -98,9 +101,9 @@ model Cliente {
   observaciones String?
   is_active     Boolean     @default(true)
 
-  propiedades Propiedad[]
-  cuentas     Cuenta[]
-  usuarios    Usuario[]
+  cuentas   Cuenta[]
+  creditors Creditor[]
+  usuarios  Usuario[]
 
   created_at DateTime @default(now())
   updated_at DateTime @updatedAt
@@ -108,13 +111,42 @@ model Cliente {
   @@map("clientes")
 }
 
+/// Acreedor (cliente del cliente SaaS): entrega cartera a cobrar.
+/// Fase 1–2: cuelga del tenant (`cliente_id`); las cuentas aún conservan `cliente_id` legacy.
+model Creditor {
+  id            String      @id @default(uuid())
+  cliente_id    String
+  cliente       Cliente     @relation(fields: [cliente_id], references: [id])
+  nombre        String
+  tipo_persona  TipoPersona
+  documento     String
+  telefono      String?
+  email         String?
+  direccion     String?
+  observaciones String?
+  is_active     Boolean     @default(true)
+
+  cuentas Cuenta[]
+
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  @@unique([cliente_id, documento], map: "creditors_cliente_documento_key")
+  @@index([cliente_id], map: "idx_creditors_cliente_id")
+  @@map("creditors")
+}
+
 model Usuario {
-  id             String    @id @default(uuid())
-  email          String    @unique
-  password_hash  String
-  role           Role
-  cliente_id     String?
-  cliente        Cliente?  @relation(fields: [cliente_id], references: [id])
+  id                     String    @id @default(uuid())
+  email                  String    @unique
+  password_hash          String?
+  role                   Role
+  cliente_id             String?
+  cliente                Cliente?  @relation(fields: [cliente_id], references: [id])
+  is_active              Boolean   @default(true)
+  activation_token_hash  String?   @unique
+  activation_expires_at  DateTime?
+  activated_at           DateTime?
 
   refresh_tokens RefreshToken[]
 
@@ -124,11 +156,16 @@ model Usuario {
   @@map("usuarios")
 }
 
-model Propiedad {
-  id              String         @id @default(uuid())
+/// Cuenta de cartera (ex propiedad): lo que el acreedor entrega para cobrar.
+model Cuenta {
+  id              String    @id @default(uuid())
+  /// Legacy/compat API: dueño operativo actual (sigue siendo el filtro del front).
   cliente_id      String
-  cliente         Cliente        @relation(fields: [cliente_id], references: [id])
-  tipo_propiedad  TipoPropiedad
+  cliente         Cliente   @relation(fields: [cliente_id], references: [id])
+  /// Fase 1–2: acreedor bajo el tenant SaaS (LegalTech). Nullable hasta backfill.
+  creditor_id     String?
+  creditor        Creditor? @relation(fields: [creditor_id], references: [id])
+  tipo_cuenta     TipoCuenta
   identificador   String
   direccion       String?
   notas           String?
@@ -137,56 +174,61 @@ model Propiedad {
   cobro_tipo_persona TipoPersona
   cobro_documento    String
   cobro_email        String
-  /// Deudores de cobro (JSON: DeudorCobro[] con emails[]). cobro_* = deudores[0] / emails[0].
-  deudores           Json
 
   monto_a_la_fecha Decimal @default(0) @db.Decimal(14, 2)
 
-  /// Máximo de dias_en_mora en historial de esta propiedad (denormalizado para listados).
   edad_mora_dias Int?
-  /// MIN(fecha_inicio_cobro) del historial (no null).
   fecha_inicio_cobro DateTime? @db.Date
-  /// MAX(fecha_fin_cobro) del historial (no null).
   fecha_fin_cobro    DateTime? @db.Date
 
-  historial_pagos HistorialPago[]
-  gestiones       Gestion[]
-  cuentas         Cuenta[]
-  payment_reminder_emails PaymentReminderEmail[]
+  historial_pagos  HistorialPago[]
+  gestiones        Gestion[]
+  procesos_legales ProcesoLegal[]
+  cuenta_deudores  CuentaDeudor[]
+
+  /// Soft delete: conserva la cuenta y sus registros para auditoría.
+  deleted_at DateTime?
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  @@index([cliente_id], map: "idx_cuentas_cliente_id")
+  @@index([creditor_id], map: "idx_cuentas_creditor_id")
+  @@index([deleted_at], map: "idx_cuentas_deleted_at")
+  @@map("cuentas")
+}
+
+/// Persona/entidad a quien se cobra (no pertenece al Cliente).
+model Deudor {
+  id           String      @id @default(uuid())
+  nombre       String
+  tipo_persona TipoPersona
+  documento    String      @unique
+  emails       String[]
+
+  cuentas CuentaDeudor[]
 
   created_at DateTime @default(now())
   updated_at DateTime @updatedAt
 
-  @@index([cliente_id], map: "idx_propiedades_cliente_id")
-  @@map("propiedades")
+  @@map("deudores")
 }
 
-model PaymentReminderEmail {
-  id               String    @id @default(uuid())
-  propiedad_id     String
-  propiedad        Propiedad @relation(fields: [propiedad_id], references: [id])
-  cliente_email    String
-  /// Destinatarios adicionales (cliente_email = principal).
-  extra_recipients String[]  @default([])
-  subject          String
-  body_html        String?   @db.Text
-  body_text        String?   @db.Text
-  status           String
-  provider_id      String?
-  error_message    String?
-  sent_at          DateTime?
-  created_at       DateTime  @default(now())
+/// Solo relaciona ids: cuenta ↔ deudor.
+model CuentaDeudor {
+  cuenta_id String
+  deudor_id String
 
-  gestion Gestion?
+  cuenta Cuenta @relation(fields: [cuenta_id], references: [id], onDelete: Cascade)
+  deudor Deudor @relation(fields: [deudor_id], references: [id], onDelete: Restrict)
 
-  @@index([propiedad_id, created_at(sort: Desc)], map: "idx_payment_reminder_emails_propiedad_created")
-  @@map("payment_reminder_emails")
+  @@id([cuenta_id, deudor_id], map: "cuenta_deudores_pkey")
+  @@map("cuenta_deudores")
 }
 
 model HistorialPago {
-  id           String    @id @default(uuid())
-  propiedad_id String
-  propiedad    Propiedad @relation(fields: [propiedad_id], references: [id])
+  id        String @id @default(uuid())
+  cuenta_id String
+  cuenta    Cuenta @relation(fields: [cuenta_id], references: [id])
 
   periodo          String        @db.Char(7)
   concepto         ConceptoPago
@@ -196,7 +238,6 @@ model HistorialPago {
   estado_pago      EstadoPago
   monto_a_la_fecha Decimal       @db.Decimal(14, 2)
 
-  /// Calculado en servidor; ver BACKEND_API §6.5.1 y domain/mora.ts.
   dias_en_mora Int?
   fecha_inicio_cobro DateTime? @db.Date
   fecha_fin_cobro    DateTime? @db.Date
@@ -205,48 +246,59 @@ model HistorialPago {
 
   created_at DateTime @default(now())
   updated_at DateTime @updatedAt
+  /// Soft delete: conserva la fila para auditoría y la excluye de cálculos operativos.
+  deleted_at DateTime?
 
-  @@index([propiedad_id, periodo], map: "idx_historial_propiedad_periodo")
+  @@index([cuenta_id, periodo], map: "idx_historial_cuenta_periodo")
+  @@index([deleted_at], map: "idx_historial_pagos_deleted_at")
   @@map("historial_pagos")
 }
 
-model Cuenta {
-  id            String    @id @default(uuid())
-  cliente_id    String
-  cliente       Cliente   @relation(fields: [cliente_id], references: [id])
-  propiedad_id  String?
-  propiedad     Propiedad? @relation(fields: [propiedad_id], references: [id])
+/// Expediente / proceso legal: cuelga solo de la cuenta (creditor → cuenta → proceso).
+model ProcesoLegal {
+  id        String @id @default(uuid())
+  cuenta_id String
+  cuenta    Cuenta @relation(fields: [cuenta_id], references: [id])
 
-  numero_cuenta String       @unique
-  tipo          TipoCuenta
-  estado        EstadoCuenta
+  numero_cuenta String              @unique
+  tipo          TipoProcesoLegal
+  estado        EstadoProcesoLegal
   etapa_proceso EtapaProceso
 
+  /// Soft delete: ocultar de listados sin borrar la fila (auditoría).
+  deleted_at DateTime?
+
   created_at DateTime @default(now())
   updated_at DateTime @updatedAt
 
-  @@index([cliente_id], map: "idx_cuentas_cliente_id")
-  @@map("cuentas")
+  @@index([cuenta_id], map: "idx_procesos_legales_cuenta_id")
+  @@index([deleted_at], map: "idx_procesos_legales_deleted_at")
+  @@map("procesos_legales")
 }
 
-model Gestion {
-  id           String    @id @default(uuid())
-  propiedad_id String
-  propiedad    Propiedad @relation(fields: [propiedad_id], references: [id])
+enum TipoGestion {
+  manual
+  email_reminder
 
-  /// Instant UTC (timestamptz). No date-only.
+  @@map("tipo_gestion_enum")
+}
+
+/// Evento de timeline de cobro. En email_reminder, `descripcion` guarda
+/// JSON con subject, destinatarios, body_html, body_text, etc.
+model Gestion {
+  id        String @id @default(uuid())
+  cuenta_id String
+  cuenta    Cuenta @relation(fields: [cuenta_id], references: [id])
+
   fecha       DateTime
+  tipo        TipoGestion
   estado      String
-  descripcion String
-  /// p.ej. "email_reminder" para gestiones auto-creadas al enviar recordatorio.
-  origen      String?
-  email_reminder_id String?               @unique
-  email_reminder    PaymentReminderEmail? @relation(fields: [email_reminder_id], references: [id], onDelete: Restrict)
+  descripcion String   @db.Text
 
   created_at DateTime @default(now())
   updated_at DateTime @updatedAt
 
-  @@index([propiedad_id, fecha])
+  @@index([cuenta_id, fecha])
   @@map("gestiones")
 }
 

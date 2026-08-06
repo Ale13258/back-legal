@@ -8,7 +8,6 @@ export class GestionesPrismaRepository implements GestionesPersistencePort {
   async listGestiones(): Promise<Gestion[]> {
     return (await prisma.gestion.findMany({
       orderBy: [{ fecha: "desc" }, { created_at: "desc" }],
-    })) as unknown as Gestion[];
+    })) as Gestion[];
   }
 }
-

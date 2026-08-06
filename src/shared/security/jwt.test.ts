@@ -9,7 +9,7 @@ import {
 
 const payload = {
   id: "user-1",
-  role: "admin" as const,
+  role: "super_admin" as const,
   cliente_id: null,
   email: "admin@test.com",
 };

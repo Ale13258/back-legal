@@ -7,8 +7,8 @@ import {
 
 export type PaymentReminderTemplateInput = {
   clienteNombre: string;
-  propiedadIdentificador: string;
-  propiedadDireccion: string | null;
+  cuentaIdentificador: string;
+  cuentaDireccion: string | null;
   montoPendiente: number;
   fechaCorte: string;
   /** Texto opcional que el administrador agrega al recordatorio. */
@@ -191,7 +191,7 @@ function buildCompanyFooterPlainLines(): string[] {
 }
 
 export function buildPaymentReminderPlainText(input: PaymentReminderTemplateInput): string {
-  const direccion = input.propiedadDireccion?.trim() || "—";
+  const direccion = input.cuentaDireccion?.trim() || "—";
   const monto = formatCurrencyCop(input.montoPendiente);
 
   return [
@@ -201,7 +201,7 @@ export function buildPaymentReminderPlainText(input: PaymentReminderTemplateInpu
     "",
     `Estimado(a) ${input.clienteNombre},`,
     "",
-    `Por medio de la presente nos permitimos recordarle que a la fecha presenta un saldo pendiente de pago correspondiente a la propiedad ${input.propiedadIdentificador} ubicada en ${direccion}.`,
+    `Por medio de la presente nos permitimos recordarle que a la fecha presenta un saldo pendiente de pago correspondiente a la cuenta ${input.cuentaIdentificador} ubicada en ${direccion}.`,
     "",
     `Monto pendiente: ${monto}`,
     `Fecha de corte: ${input.fechaCorte}`,
@@ -231,8 +231,8 @@ function buildInquietudesHtmlBlock(): string {
 
 export function buildPaymentReminderEmailHtml(input: PaymentReminderTemplateInput): string {
   const cliente = escapeHtml(input.clienteNombre);
-  const identificador = escapeHtml(input.propiedadIdentificador);
-  const direccion = escapeHtml(input.propiedadDireccion?.trim() || "—");
+  const identificador = escapeHtml(input.cuentaIdentificador);
+  const direccion = escapeHtml(input.cuentaDireccion?.trim() || "—");
   const monto = escapeHtml(formatCurrencyCop(input.montoPendiente));
   const fecha = escapeHtml(input.fechaCorte);
   const header = buildEmailHeaderHtml(fecha);
@@ -240,7 +240,7 @@ export function buildPaymentReminderEmailHtml(input: PaymentReminderTemplateInpu
   const notaBlock = buildNotaHtmlBlock(input.nota);
 
   const preheader = escapeHtml(
-    `Recordatorio de pago — ${input.propiedadIdentificador} — ${formatCurrencyCop(input.montoPendiente)}`,
+    `Recordatorio de pago — ${input.cuentaIdentificador} — ${formatCurrencyCop(input.montoPendiente)}`,
   );
 
   return `<!DOCTYPE html>
@@ -261,11 +261,11 @@ export function buildPaymentReminderEmailHtml(input: PaymentReminderTemplateInpu
           <tr>
             <td style="padding:24px 28px 8px;font-family:Arial,Helvetica,sans-serif;font-size:15px;line-height:1.6;color:#333333;">
               <p style="margin:0 0 14px;font-size:15px;color:#333333;">Estimado(a) <strong>${cliente}</strong>,</p>
-              <p style="margin:0 0 18px;font-size:15px;color:#444444;">Por medio de la presente nos permitimos recordarle que a la fecha presenta un <strong>saldo pendiente de pago</strong> correspondiente a la propiedad indicada a continuación.</p>
+              <p style="margin:0 0 18px;font-size:15px;color:#444444;">Por medio de la presente nos permitimos recordarle que a la fecha presenta un <strong>saldo pendiente de pago</strong> correspondiente a la cuenta indicada a continuación.</p>
               <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;margin:0 0 18px;">
                 <tr>
                   <td style="padding:12px 14px;background-color:#f7f7f7;border:1px solid #e0e0e0;">
-                    <p style="margin:0 0 4px;font-size:14px;color:#222222;"><strong>Propiedad:</strong> ${identificador}</p>
+                    <p style="margin:0 0 4px;font-size:14px;color:#222222;"><strong>Cuenta:</strong> ${identificador}</p>
                     <p style="margin:0;font-size:14px;color:#555555;"><strong>Dirección:</strong> ${direccion}</p>
                   </td>
                 </tr>

@@ -26,6 +26,13 @@ export class RegisterClienteUseCase {
 
     const exists = await this.deps.authPersistence.findUserByEmail(input.email);
     if (exists) {
+      if (exists.activated_at == null || exists.password_hash == null) {
+        throw new ApiError(
+          400,
+          "BUSINESS_RULE_VIOLATION",
+          "Este cliente ya tiene una invitacion pendiente; usa el enlace del correo o solicita reenvio",
+        );
+      }
       throw new ApiError(409, "CONFLICT", "El usuario ya existe");
     }
 

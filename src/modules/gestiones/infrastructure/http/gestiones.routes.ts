@@ -1,10 +1,10 @@
 import { Router } from "express";
-import { requireAuth, requireRole } from "../../../../shared/security/auth.middleware.js";
+import { requireAuth, requireStaff } from "../../../../shared/security/auth.middleware.js";
 import { GestionesPrismaRepository } from "../persistence/gestiones-prisma.repository.js";
 import { ListGestionesUseCase } from "../../application/use-cases/list-gestiones.use-case.js";
 
 export const gestionesRouter = Router();
-gestionesRouter.use(requireAuth, requireRole("admin"));
+gestionesRouter.use(requireAuth, requireStaff());
 
 const repo = new GestionesPrismaRepository();
 const listGestionesUseCase = new ListGestionesUseCase({ gestionesPersistence: repo });

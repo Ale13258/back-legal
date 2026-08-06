@@ -1,24 +1,24 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { ApiError } from "../../../../shared/http/error-handler.js";
+import { parseEmailGestionDescripcion } from "../../domain/email-gestion-descripcion.js";
 import type { EmailSenderPort, SendEmailInput } from "../../domain/ports/email-sender.port.js";
 import type {
-  PaymentReminderEmailRecord,
-  PaymentReminderEmailWithBody,
   PaymentRemindersPersistencePort,
-  PropiedadForReminder,
+  CuentaForReminder,
+  ReminderGestionRecord,
 } from "../../domain/ports/payment-reminders-persistence.port.js";
 import { SendPaymentReminderEmailUseCase } from "./send-payment-reminder-email.use-case.js";
 
 process.env.GMAIL_FROM ??= "notificaciones@test.local";
 
-const propiedadId = "11111111-1111-1111-1111-111111111111";
+const cuentaId = "11111111-1111-1111-1111-111111111111";
 const sampleBodyHtml = "<!DOCTYPE html><html lang=\"es\"><body><p>Hola</p></body></html>";
 const sampleBodyText = "Hola, le recordamos su pago pendiente.";
 
-function basePropiedad(overrides: Partial<PropiedadForReminder> = {}): PropiedadForReminder {
+function baseCuenta(overrides: Partial<CuentaForReminder> = {}): CuentaForReminder {
   return {
-    id: propiedadId,
+    id: cuentaId,
     identificador: "APT-101",
     direccion: "Calle 1 # 2-3",
     monto_a_la_fecha: 150000,
@@ -29,69 +29,33 @@ function basePropiedad(overrides: Partial<PropiedadForReminder> = {}): Propiedad
 }
 
 function createMocks() {
-  const logs: PaymentReminderEmailWithBody[] = [];
-  const queuedBodies: { body_html: string; body_text: string }[] = [];
-  const gestiones: { email_reminder_id: string; descripcion: string; fecha: Date }[] = [];
-  let propiedad: PropiedadForReminder | null = basePropiedad();
+  const gestiones: ReminderGestionRecord[] = [];
+  let cuenta: CuentaForReminder | null = baseCuenta();
   let lastSendInput: SendEmailInput | null = null;
 
   const persistence: PaymentRemindersPersistencePort = {
-    async findPropiedadForReminder() {
-      return propiedad;
+    async findCuentaForReminder() {
+      return cuenta;
     },
-    async createQueued(input) {
-      queuedBodies.push({ body_html: input.body_html, body_text: input.body_text });
-      const row: PaymentReminderEmailWithBody = {
-        id: "log-1",
-        propiedad_id: input.propiedad_id,
-        cliente_email: input.cliente_email,
-        extra_recipients: input.extra_recipients,
-        subject: input.subject,
-        status: "queued",
-        provider_id: null,
-        error_message: null,
-        sent_at: null,
-        created_at: new Date("2026-05-21T12:00:00.000Z"),
-        gestion_id: null,
-        body_html: input.body_html,
-        body_text: input.body_text,
-      };
-      logs.push(row);
-      return row;
-    },
-    async markSentWithGestion(input) {
-      gestiones.push({
-        email_reminder_id: input.id,
-        descripcion: input.descripcion,
+    async createSentEmailGestion(input) {
+      const row: ReminderGestionRecord = {
+        id: "gestion-1",
+        cuenta_id: input.cuenta_id,
         fecha: input.sent_at,
-      });
-      const row: PaymentReminderEmailWithBody = {
-        ...logs[0],
-        status: "sent",
-        provider_id: input.provider_id,
-        sent_at: input.sent_at,
-        error_message: null,
-        gestion_id: "gestion-1",
-        body_html: queuedBodies[0]?.body_html ?? null,
-        body_text: queuedBodies[0]?.body_text ?? null,
+        tipo: "email_reminder",
+        estado: "enviado",
+        descripcion: input.descripcion,
+        created_at: input.sent_at,
+        updated_at: input.sent_at,
       };
-      logs[0] = row;
+      gestiones.push(row);
       return row;
     },
-    async markFailed(input) {
-      const row: PaymentReminderEmailWithBody = {
-        ...logs[0],
-        status: "failed",
-        error_message: input.error_message,
-      };
-      logs[0] = row;
-      return row;
+    async findEmailGestionById(id) {
+      return gestiones.find((g) => g.id === id) ?? null;
     },
-    async findById(id: string) {
-      return logs.find((row) => row.id === id) ?? null;
-    },
-    async listByPropiedad() {
-      return logs;
+    async listEmailGestionesByCuenta() {
+      return gestiones;
     },
   };
 
@@ -105,17 +69,11 @@ function createMocks() {
   return {
     persistence,
     emailSender,
-    setPropiedad(p: PropiedadForReminder | null) {
-      propiedad = p;
-    },
-    getLogs() {
-      return logs;
+    setCuenta(p: CuentaForReminder | null) {
+      cuenta = p;
     },
     getGestiones() {
       return gestiones;
-    },
-    getQueuedBodies() {
-      return queuedBodies;
     },
     getLastSendInput() {
       return lastSendInput;
@@ -125,14 +83,14 @@ function createMocks() {
 
 function baseInput() {
   return {
-    propiedad_id: propiedadId,
+    cuenta_id: cuentaId,
     body_html: sampleBodyHtml,
     body_text: sampleBodyText,
   };
 }
 
 describe("SendPaymentReminderEmailUseCase", () => {
-  it("envía correo con el HTML y texto del admin", async () => {
+  it("envía correo y guarda el cuerpo en la gestión", async () => {
     const mocks = createMocks();
     const useCase = new SendPaymentReminderEmailUseCase({
       persistence: mocks.persistence,
@@ -140,15 +98,18 @@ describe("SendPaymentReminderEmailUseCase", () => {
     });
 
     const result = await useCase.execute(baseInput());
+    const email = parseEmailGestionDescripcion(result.descripcion);
 
-    assert.equal(result.status, "sent");
-    assert.equal(result.cliente_email, "cobro@example.com");
-    assert.deepEqual(result.extra_recipients, []);
-    assert.equal(result.provider_id, "<test@mail>");
-    assert.equal(result.subject, "Recordatorio de pago - APT-101");
-    assert.equal(result.gestion_id, "gestion-1");
-    assert.equal(result.body_html, sampleBodyHtml);
-    assert.equal(result.body_text, sampleBodyText);
+    assert.equal(result.estado, "enviado");
+    assert.equal(result.tipo, "email_reminder");
+    assert.equal(result.id, "gestion-1");
+    assert.ok(email);
+    assert.equal(email.cliente_email, "cobro@example.com");
+    assert.deepEqual(email.extra_recipients, []);
+    assert.equal(email.provider_id, "<test@mail>");
+    assert.equal(email.subject, "Recordatorio de pago - APT-101");
+    assert.equal(email.body_html, sampleBodyHtml);
+    assert.equal(email.body_text, sampleBodyText);
 
     const sent = mocks.getLastSendInput();
     assert.equal(sent?.html, sampleBodyHtml);
@@ -157,31 +118,12 @@ describe("SendPaymentReminderEmailUseCase", () => {
     assert.ok(sent?.attachments && sent.attachments.length >= 4);
     assert.equal(sent.attachments[0]?.contentDisposition, "inline");
 
-    const gestiones = mocks.getGestiones();
-    assert.equal(gestiones.length, 1);
-    assert.equal(gestiones[0]?.email_reminder_id, "log-1");
-    assert.match(gestiones[0]?.descripcion ?? "", /Asunto: Recordatorio de pago - APT-101/);
-    assert.match(gestiones[0]?.descripcion ?? "", /Para: cobro@example.com/);
+    assert.equal(mocks.getGestiones().length, 1);
   });
 
-  it("persiste body_html y body_text al encolar", async () => {
+  it("404 si la cuenta no existe", async () => {
     const mocks = createMocks();
-    const useCase = new SendPaymentReminderEmailUseCase({
-      persistence: mocks.persistence,
-      emailSender: mocks.emailSender,
-    });
-
-    await useCase.execute(baseInput());
-
-    const bodies = mocks.getQueuedBodies();
-    assert.equal(bodies.length, 1);
-    assert.equal(bodies[0]?.body_html, sampleBodyHtml);
-    assert.equal(bodies[0]?.body_text, sampleBodyText);
-  });
-
-  it("404 si la propiedad no existe", async () => {
-    const mocks = createMocks();
-    mocks.setPropiedad(null);
+    mocks.setCuenta(null);
     const useCase = new SendPaymentReminderEmailUseCase({
       persistence: mocks.persistence,
       emailSender: mocks.emailSender,
@@ -195,7 +137,7 @@ describe("SendPaymentReminderEmailUseCase", () => {
 
   it("400 si no hay email de cobro", async () => {
     const mocks = createMocks();
-    mocks.setPropiedad(basePropiedad({ cobro_email: "   " }));
+    mocks.setCuenta(baseCuenta({ cobro_email: "   " }));
     const useCase = new SendPaymentReminderEmailUseCase({
       persistence: mocks.persistence,
       emailSender: mocks.emailSender,
@@ -206,13 +148,13 @@ describe("SendPaymentReminderEmailUseCase", () => {
       (err: unknown) =>
         err instanceof ApiError &&
         err.status === 400 &&
-        err.message === "La propiedad no tiene un email de cobro válido",
+        err.message === "La cuenta no tiene un email de cobro válido",
     );
   });
 
   it("400 si no hay saldo pendiente", async () => {
     const mocks = createMocks();
-    mocks.setPropiedad(basePropiedad({ monto_a_la_fecha: 0 }));
+    mocks.setCuenta(baseCuenta({ monto_a_la_fecha: 0 }));
     const useCase = new SendPaymentReminderEmailUseCase({
       persistence: mocks.persistence,
       emailSender: mocks.emailSender,
@@ -273,23 +215,20 @@ describe("SendPaymentReminderEmailUseCase", () => {
       subject: "Pago pendiente APT-101",
       extra_recipients: ["cobro@example.com", "extra@example.com"],
     });
+    const email = parseEmailGestionDescripcion(result.descripcion);
 
-    assert.equal(result.status, "sent");
-    assert.equal(result.subject, "Pago pendiente APT-101");
-    assert.equal(result.cliente_email, "cobro@example.com");
-    assert.deepEqual(result.extra_recipients, ["extra@example.com"]);
-    assert.equal(result.gestion_id, "gestion-1");
+    assert.equal(result.estado, "enviado");
+    assert.ok(email);
+    assert.equal(email.subject, "Pago pendiente APT-101");
+    assert.equal(email.cliente_email, "cobro@example.com");
+    assert.deepEqual(email.extra_recipients, ["extra@example.com"]);
 
     const sent = mocks.getLastSendInput();
     assert.equal(sent?.subject, "Pago pendiente APT-101");
     assert.equal(sent?.to, "cobro@example.com, extra@example.com");
-
-    const queued = mocks.getLogs()[0] as PaymentReminderEmailRecord;
-    assert.equal(queued.cliente_email, "cobro@example.com");
-    assert.deepEqual(queued.extra_recipients, ["extra@example.com"]);
   });
 
-  it("marca failed, no crea gestión y relanza si el envío SMTP falla", async () => {
+  it("no crea gestión y relanza si el envío SMTP falla", async () => {
     const mocks = createMocks();
     const failingSender: EmailSenderPort = {
       async send() {
@@ -305,7 +244,6 @@ describe("SendPaymentReminderEmailUseCase", () => {
       () => useCase.execute(baseInput()),
       (err: unknown) => err instanceof ApiError && err.status === 502,
     );
-    assert.equal(mocks.getLogs()[0]?.status, "failed");
     assert.equal(mocks.getGestiones().length, 0);
   });
 });

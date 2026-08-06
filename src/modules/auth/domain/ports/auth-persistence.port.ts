@@ -1,5 +1,6 @@
-export type AuthRole = "admin" | "cliente";
+import type { AuthRole } from "../../../../shared/security/roles.js";
 
+export type { AuthRole };
 export type AuthUserPayload = {
   id: string;
   role: AuthRole;
@@ -12,7 +13,9 @@ export type PersistedAuthUser = {
   role: AuthRole;
   cliente_id: string | null;
   email: string;
-  password_hash: string;
+  password_hash: string | null;
+  is_active: boolean;
+  activated_at: Date | null;
 };
 
 export type PersistedCliente = {
@@ -43,6 +46,24 @@ export type AuthPersistenceRevokeRefreshTokensInput = {
   token_hash: string;
 };
 
+export type RegistrationInvitation = {
+  email: string;
+  role: "analista_legal" | "abogada_junior" | "cliente";
+  expires_at: Date;
+};
+
+export type ActivateStaffByInvitationInput = {
+  activation_token_hash: string;
+  password_hash: string;
+  now: Date;
+};
+
+export type ActivateStaffByInvitationResult = {
+  id: string;
+  email: string;
+  role: "analista_legal" | "abogada_junior" | "cliente";
+};
+
 export interface AuthPersistencePort {
   findUserByEmail(email: string): Promise<PersistedAuthUser | null>;
   findClienteByEmail(email: string): Promise<PersistedCliente | null>;
@@ -53,6 +74,15 @@ export interface AuthPersistencePort {
     role: "cliente";
     cliente_id: string;
   }): Promise<AuthUserPayload>;
+
+  findValidRegistrationInvitation(
+    activation_token_hash: string,
+    now: Date,
+  ): Promise<RegistrationInvitation | null>;
+
+  activateStaffByInvitation(
+    input: ActivateStaffByInvitationInput,
+  ): Promise<ActivateStaffByInvitationResult | null>;
 
   createRefreshToken(input: {
     usuario_id: string;
@@ -75,4 +105,3 @@ export interface AuthPersistencePort {
 
   revokeRefreshTokens(input: AuthPersistenceRevokeRefreshTokensInput): Promise<void>;
 }
-

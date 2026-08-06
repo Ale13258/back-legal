@@ -4,10 +4,14 @@ import { ApiError } from "../../../../shared/http/error-handler.js";
 import { SendPaymentReminderEmailUseCase } from "../../application/use-cases/send-payment-reminder-email.use-case.js";
 import { NodemailerGmailEmailSender } from "../email/nodemailer-gmail.sender.js";
 import { PaymentRemindersPrismaRepository } from "../persistence/payment-reminders-prisma.repository.js";
-import type { PaymentReminderEmailWithBody } from "../../domain/ports/payment-reminders-persistence.port.js";
+import type { ReminderGestionRecord } from "../../domain/ports/payment-reminders-persistence.port.js";
+import {
+  parseEmailGestionDescripcion,
+  gestionDescripcionPreview,
+} from "../../domain/email-gestion-descripcion.js";
 import {
   requireAuth,
-  requireRole,
+  requireStaff,
 } from "../../../../shared/security/auth.middleware.js";
 
 const MAX_ATTACHMENT_BYTES = 5 * 1024 * 1024;
@@ -21,7 +25,7 @@ const attachmentSchema = z.object({
 });
 
 const sendSchema = z.object({
-  propiedad_id: z.string().uuid(),
+  cuenta_id: z.string().uuid(),
   subject: z.string().trim().min(1).max(200).optional(),
   extra_recipients: z.array(z.string().trim().email()).max(5).optional(),
   body_html: z
@@ -80,21 +84,24 @@ const listQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(100).default(10),
 });
 
-function toEmailResponse(record: PaymentReminderEmailWithBody) {
+function toEmailResponse(record: ReminderGestionRecord) {
+  const email = parseEmailGestionDescripcion(record.descripcion);
   return {
     id: record.id,
-    propiedad_id: record.propiedad_id,
-    cliente_email: record.cliente_email,
-    extra_recipients: record.extra_recipients,
-    subject: record.subject,
-    body_html: record.body_html,
-    body_text: record.body_text,
-    status: record.status,
-    provider_id: record.provider_id,
-    error_message: record.error_message,
-    sent_at: record.sent_at,
+    gestion_id: record.id,
+    cuenta_id: record.cuenta_id,
+    cliente_email: email?.cliente_email ?? "",
+    extra_recipients: email?.extra_recipients ?? [],
+    subject: email?.subject ?? gestionDescripcionPreview(record.descripcion),
+    body_html: email?.body_html ?? null,
+    body_text: email?.body_text ?? null,
+    status: email?.status ?? record.estado,
+    provider_id: email?.provider_id ?? null,
+    error_message: null,
+    sent_at: email?.sent_at ? new Date(email.sent_at) : record.fecha,
     created_at: record.created_at,
-    gestion_id: record.gestion_id,
+    descripcion: record.descripcion,
+    resumen: gestionDescripcionPreview(record.descripcion),
   };
 }
 
@@ -107,12 +114,12 @@ const sendPaymentReminderEmailUseCase = new SendPaymentReminderEmailUseCase({
 
 export const paymentRemindersRouter = Router();
 
-paymentRemindersRouter.post("/email/send", requireAuth, requireRole("admin"), async (req, res, next) => {
+paymentRemindersRouter.post("/email/send", requireAuth, requireStaff(), async (req, res, next) => {
   try {
     const dto = sendSchema.parse(req.body);
     const attachments = parseAttachments(dto.attachments);
     const result = await sendPaymentReminderEmailUseCase.execute({
-      propiedad_id: dto.propiedad_id,
+      cuenta_id: dto.cuenta_id,
       subject: dto.subject,
       extra_recipients: dto.extra_recipients,
       body_html: dto.body_html,
@@ -126,13 +133,13 @@ paymentRemindersRouter.post("/email/send", requireAuth, requireRole("admin"), as
 });
 
 paymentRemindersRouter.get(
-  "/propiedades/:propiedadId/emails",
+  "/cuentas/:cuentaId/emails",
   requireAuth,
-  requireRole("admin"),
+  requireStaff(),
   async (req, res, next) => {
     try {
       const q = listQuerySchema.parse(req.query);
-      const items = await persistence.listByPropiedad(req.params.propiedadId, q.limit);
+      const items = await persistence.listEmailGestionesByCuenta(req.params.cuentaId, q.limit);
       res.json({ items: items.map(toEmailResponse) });
     } catch (error) {
       next(error);
@@ -144,11 +151,11 @@ const idParamSchema = z.object({
   id: z.string().uuid(),
 });
 
-/** Detalle de un correo (p.ej. desde gestión con email_reminder_id). */
-paymentRemindersRouter.get("/:id", requireAuth, requireRole("admin"), async (req, res, next) => {
+/** Detalle de un correo = gestión tipo email_reminder (descripcion con el cuerpo). */
+paymentRemindersRouter.get("/:id", requireAuth, requireStaff(), async (req, res, next) => {
   try {
     const { id } = idParamSchema.parse(req.params);
-    const record = await persistence.findById(id);
+    const record = await persistence.findEmailGestionById(id);
     if (!record) {
       throw new ApiError(404, "NOT_FOUND", "Recordatorio de correo no encontrado");
     }

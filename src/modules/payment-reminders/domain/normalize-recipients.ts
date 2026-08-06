@@ -35,4 +35,8 @@ export function mergeRecipientList(primary: string, extras?: string[]): string {
   return [cliente_email, ...extra_recipients].filter(Boolean).join(", ");
 }
 
-export const GESTION_ORIGEN_EMAIL_REMINDER = "email_reminder" as const;
+export const GESTION_TIPO_EMAIL_REMINDER = "email_reminder" as const;
+export const GESTION_TIPO_MANUAL = "manual" as const;
+
+/** @deprecated usar GESTION_TIPO_EMAIL_REMINDER */
+export const GESTION_ORIGEN_EMAIL_REMINDER = GESTION_TIPO_EMAIL_REMINDER;

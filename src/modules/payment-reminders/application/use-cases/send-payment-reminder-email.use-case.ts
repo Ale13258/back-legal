@@ -1,5 +1,6 @@
 import { ApiError } from "../../../../shared/http/error-handler.js";
 import { getGmailFromAddress } from "../../../../shared/infrastructure/email/gmail-transport.js";
+import { buildEmailGestionDescripcion } from "../../domain/email-gestion-descripcion.js";
 import {
   mergeRecipientList,
   normalizeReminderRecipients,
@@ -19,7 +20,7 @@ export class SendPaymentReminderEmailUseCase {
   ) {}
 
   async execute(input: {
-    propiedad_id: string;
+    cuenta_id: string;
     subject?: string;
     extra_recipients?: string[];
     body_html: string;
@@ -32,42 +33,33 @@ export class SendPaymentReminderEmailUseCase {
   }) {
     assertSafeReminderEmailBody(input.body_html);
 
-    const propiedad = await this.deps.persistence.findPropiedadForReminder(input.propiedad_id);
-    if (!propiedad) {
-      throw new ApiError(404, "NOT_FOUND", "Propiedad no encontrada");
+    const cuenta = await this.deps.persistence.findCuentaForReminder(input.cuenta_id);
+    if (!cuenta) {
+      throw new ApiError(404, "NOT_FOUND", "Cuenta no encontrada");
     }
 
-    if (propiedad.monto_a_la_fecha <= 0) {
+    if (cuenta.monto_a_la_fecha <= 0) {
       throw new ApiError(
         400,
         "VALIDATION_ERROR",
-        "La propiedad no tiene saldo pendiente para recordatorio",
+        "La cuenta no tiene saldo pendiente para recordatorio",
       );
     }
 
-    const to = propiedad.cobro_email.trim();
+    const to = cuenta.cobro_email.trim();
     if (!to) {
       throw new ApiError(
         400,
         "VALIDATION_ERROR",
-        "La propiedad no tiene un email de cobro válido",
+        "La cuenta no tiene un email de cobro válido",
       );
     }
 
     const subject =
-      input.subject?.trim() || `Recordatorio de pago - ${propiedad.identificador}`;
+      input.subject?.trim() || `Recordatorio de pago - ${cuenta.identificador}`;
     const recipients = normalizeReminderRecipients(to, input.extra_recipients);
     const smtpTo = mergeRecipientList(recipients.cliente_email, recipients.extra_recipients);
     const html = embedReminderBrandingInHtml(input.body_html);
-
-    const log = await this.deps.persistence.createQueued({
-      propiedad_id: propiedad.id,
-      cliente_email: recipients.cliente_email,
-      extra_recipients: recipients.extra_recipients,
-      subject,
-      body_html: html,
-      body_text: input.body_text,
-    });
 
     const brandedAttachments: SendEmailAttachment[] = getPaymentReminderEmailAttachments().map(
       (file) => ({
@@ -86,31 +78,28 @@ export class SendPaymentReminderEmailUseCase {
         contentDisposition: "attachment" as const,
       })) ?? [];
 
-    try {
-      const sent = await this.deps.emailSender.send({
-        from: getGmailFromAddress(),
-        to: smtpTo,
-        subject,
-        html,
-        text: input.body_text,
-        attachments: [...brandedAttachments, ...userAttachments],
-      });
+    const sent = await this.deps.emailSender.send({
+      from: getGmailFromAddress(),
+      to: smtpTo,
+      subject,
+      html,
+      text: input.body_text,
+      attachments: [...brandedAttachments, ...userAttachments],
+    });
 
-      const sentAt = new Date();
-      return await this.deps.persistence.markSentWithGestion({
-        id: log.id,
+    const sentAt = new Date();
+    return this.deps.persistence.createSentEmailGestion({
+      cuenta_id: cuenta.id,
+      sent_at: sentAt,
+      descripcion: buildEmailGestionDescripcion({
+        subject,
+        cliente_email: recipients.cliente_email,
+        extra_recipients: recipients.extra_recipients,
+        body_html: html,
+        body_text: input.body_text,
         provider_id: sent.provider_id,
         sent_at: sentAt,
-        propiedad_id: propiedad.id,
-        descripcion: `Recordatorio de pago por correo — Asunto: ${subject} — Para: ${recipients.cliente_email}`,
-      });
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Error al enviar correo";
-      await this.deps.persistence.markFailed({
-        id: log.id,
-        error_message: message,
-      });
-      throw error;
-    }
+      }),
+    });
   }
 }

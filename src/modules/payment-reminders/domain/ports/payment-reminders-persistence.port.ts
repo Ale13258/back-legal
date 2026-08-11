@@ -1,4 +1,4 @@
-export type PropiedadForReminder = {
+export type CuentaForReminder = {
   id: string;
   identificador: string;
   direccion: string | null;
@@ -7,40 +7,28 @@ export type PropiedadForReminder = {
   cobro_email: string;
 };
 
-export type PaymentReminderEmailRecord = {
+export type ReminderGestionRecord = {
   id: string;
-  propiedad_id: string;
-  cliente_email: string;
-  subject: string;
-  status: string;
-  provider_id: string | null;
-  error_message: string | null;
-  sent_at: Date | null;
+  cuenta_id: string;
+  fecha: Date;
+  tipo: "email_reminder";
+  estado: string;
+  descripcion: string;
   created_at: Date;
-};
-
-export type PaymentReminderEmailWithBody = PaymentReminderEmailRecord & {
-  body_html: string | null;
-  body_text: string | null;
+  updated_at: Date;
 };
 
 export interface PaymentRemindersPersistencePort {
-  findPropiedadForReminder(propiedadId: string): Promise<PropiedadForReminder | null>;
-  createQueued(input: {
-    propiedad_id: string;
-    cliente_email: string;
-    subject: string;
-    body_html: string;
-    body_text: string;
-  }): Promise<PaymentReminderEmailRecord>;
-  markSent(input: {
-    id: string;
-    provider_id: string;
+  findCuentaForReminder(cuentaId: string): Promise<CuentaForReminder | null>;
+  /** Crea el evento de gestión con el correo completo en `descripcion`. */
+  createSentEmailGestion(input: {
+    cuenta_id: string;
     sent_at: Date;
-  }): Promise<PaymentReminderEmailRecord>;
-  markFailed(input: {
-    id: string;
-    error_message: string;
-  }): Promise<PaymentReminderEmailRecord>;
-  listByPropiedad(propiedadId: string, limit: number): Promise<PaymentReminderEmailWithBody[]>;
+    descripcion: string;
+  }): Promise<ReminderGestionRecord>;
+  findEmailGestionById(id: string): Promise<ReminderGestionRecord | null>;
+  listEmailGestionesByCuenta(
+    cuentaId: string,
+    limit: number,
+  ): Promise<ReminderGestionRecord[]>;
 }

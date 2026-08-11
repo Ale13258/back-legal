@@ -7,11 +7,11 @@ import {
 } from "./payment-reminder.template.js";
 
 describe("payment-reminder.template", () => {
-  it("formatea COP y genera HTML con datos de la propiedad", () => {
+  it("formatea COP y genera HTML con datos de la cuenta", () => {
     const input = {
       clienteNombre: "María",
-      propiedadIdentificador: "LOC-9",
-      propiedadDireccion: "Carrera 10",
+      cuentaIdentificador: "LOC-9",
+      cuentaDireccion: "Carrera 10",
       montoPendiente: 250000,
       fechaCorte: "21 de mayo de 2026",
     };
@@ -38,16 +38,16 @@ describe("payment-reminder.template", () => {
   it("incluye bloque de nota cuando se envía texto adicional", () => {
     const html = buildPaymentReminderEmailHtml({
       clienteNombre: "Juan",
-      propiedadIdentificador: "APT-1",
-      propiedadDireccion: "Calle 1",
+      cuentaIdentificador: "APT-1",
+      cuentaDireccion: "Calle 1",
       montoPendiente: 100000,
       fechaCorte: "hoy",
       nota: "Favor consignar antes del viernes.\nGracias.",
     });
     const text = buildPaymentReminderPlainText({
       clienteNombre: "Juan",
-      propiedadIdentificador: "APT-1",
-      propiedadDireccion: "Calle 1",
+      cuentaIdentificador: "APT-1",
+      cuentaDireccion: "Calle 1",
       montoPendiente: 100000,
       fechaCorte: "hoy",
       nota: "Favor consignar antes del viernes.",
@@ -62,8 +62,8 @@ describe("payment-reminder.template", () => {
   it("escapa HTML en nombres con caracteres especiales", () => {
     const html = buildPaymentReminderEmailHtml({
       clienteNombre: 'A & B <script>',
-      propiedadIdentificador: "X",
-      propiedadDireccion: null,
+      cuentaIdentificador: "X",
+      cuentaDireccion: null,
       montoPendiente: 1,
       fechaCorte: "hoy",
     });

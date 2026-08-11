@@ -1,22 +1,22 @@
 import { Router } from "express";
 import { prisma } from "../../../../shared/infrastructure/prisma/prisma.client.js";
-import { requireAuth, requireRole } from "../../../../shared/security/auth.middleware.js";
+import { requireAuth, requireStaff } from "../../../../shared/security/auth.middleware.js";
 
 export const metricsRouter = Router();
-metricsRouter.use(requireAuth, requireRole("admin"));
+metricsRouter.use(requireAuth, requireStaff());
 
 metricsRouter.get("/dashboard", async (_req, res, next) => {
   try {
-    const [totalAgg, clientesActivos, cuentasActivas] = await Promise.all([
-      prisma.propiedad.aggregate({ _sum: { monto_a_la_fecha: true } }),
+    const [totalAgg, clientesActivos, procesosLegalesActivos] = await Promise.all([
+      prisma.cuenta.aggregate({ _sum: { monto_a_la_fecha: true } }),
       prisma.cliente.count({ where: { is_active: true } }),
-      prisma.cuenta.count({ where: { estado: "activa" } }),
+      prisma.procesoLegal.count({ where: { estado: "activa", deleted_at: null } }),
     ]);
 
     res.json({
       total_cartera: Number(totalAgg._sum.monto_a_la_fecha ?? 0),
       clientes_activos: clientesActivos,
-      cuentas_activas: cuentasActivas,
+      procesos_legales_activos: procesosLegalesActivos,
     });
   } catch (error) {
     next(error);
@@ -25,8 +25,9 @@ metricsRouter.get("/dashboard", async (_req, res, next) => {
 
 metricsRouter.get("/distribucion-estados", async (_req, res, next) => {
   try {
-    const grouped = await prisma.cuenta.groupBy({
+    const grouped = await prisma.procesoLegal.groupBy({
       by: ["estado"],
+      where: { deleted_at: null },
       _count: { _all: true },
     });
 
@@ -52,7 +53,10 @@ metricsRouter.get("/evolucion-cartera", async (req, res, next) => {
 
     const grouped = await prisma.historialPago.groupBy({
       by: ["periodo"],
-      where: { periodo: { in: periods } },
+      where: {
+        periodo: { in: periods },
+        deleted_at: null,
+      },
       _sum: { valor_cobrado: true, valor_pagado: true },
     });
 

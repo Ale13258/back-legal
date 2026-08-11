@@ -1,6 +1,7 @@
 import jwt from "jsonwebtoken";
 import crypto from "node:crypto";
 import { ApiError } from "../http/error-handler.js";
+import { isAuthRole, type AuthRole } from "./roles.js";
 
 const ACCESS_SECRET = process.env.JWT_ACCESS_SECRET || "dev_access_secret";
 const REFRESH_SECRET = process.env.JWT_REFRESH_SECRET || "dev_refresh_secret";
@@ -9,7 +10,7 @@ const REFRESH_EXPIRES_IN = (process.env.JWT_REFRESH_EXPIRES_IN || "1d") as jwt.S
 
 type UserPayload = {
   id: string;
-  role: "admin" | "cliente";
+  role: AuthRole;
   cliente_id: string | null;
   email: string;
 };
@@ -20,12 +21,11 @@ function toUserPayloadOrThrow(decoded: unknown, tokenType: "Access" | "Refresh")
   }
 
   const candidate = decoded as Record<string, unknown>;
-  const isRoleValid = candidate.role === "admin" || candidate.role === "cliente";
   const isClienteIdValid = typeof candidate.cliente_id === "string" || candidate.cliente_id === null;
 
   if (
     typeof candidate.id !== "string" ||
-    !isRoleValid ||
+    !isAuthRole(candidate.role) ||
     !isClienteIdValid ||
     typeof candidate.email !== "string"
   ) {
@@ -34,7 +34,7 @@ function toUserPayloadOrThrow(decoded: unknown, tokenType: "Access" | "Refresh")
 
   return {
     id: candidate.id,
-    role: candidate.role as "admin" | "cliente",
+    role: candidate.role,
     cliente_id: candidate.cliente_id as string | null,
     email: candidate.email,
   };

@@ -1,51 +1,37 @@
 import { prisma } from "../../../../shared/infrastructure/prisma/prisma.client.js";
+import { GESTION_TIPO_EMAIL_REMINDER } from "../../domain/normalize-recipients.js";
 import type {
-  PaymentReminderEmailRecord,
-  PaymentReminderEmailWithBody,
   PaymentRemindersPersistencePort,
-  PropiedadForReminder,
+  CuentaForReminder,
+  ReminderGestionRecord,
 } from "../../domain/ports/payment-reminders-persistence.port.js";
 
-type PaymentReminderEmailRow = {
+function mapGestion(row: {
   id: string;
-  propiedad_id: string;
-  cliente_email: string;
-  subject: string;
-  status: string;
-  provider_id: string | null;
-  error_message: string | null;
-  sent_at: Date | null;
+  cuenta_id: string;
+  fecha: Date;
+  tipo: string;
+  estado: string;
+  descripcion: string;
   created_at: Date;
-};
-
-function mapRecord(row: PaymentReminderEmailRow): PaymentReminderEmailRecord {
+  updated_at: Date;
+}): ReminderGestionRecord {
   return {
     id: row.id,
-    propiedad_id: row.propiedad_id,
-    cliente_email: row.cliente_email,
-    subject: row.subject,
-    status: row.status,
-    provider_id: row.provider_id,
-    error_message: row.error_message,
-    sent_at: row.sent_at,
+    cuenta_id: row.cuenta_id,
+    fecha: row.fecha,
+    tipo: "email_reminder",
+    estado: row.estado,
+    descripcion: row.descripcion,
     created_at: row.created_at,
-  };
-}
-
-function mapRecordWithBody(
-  row: PaymentReminderEmailRow & { body_html: string | null; body_text: string | null },
-): PaymentReminderEmailWithBody {
-  return {
-    ...mapRecord(row),
-    body_html: row.body_html,
-    body_text: row.body_text,
+    updated_at: row.updated_at,
   };
 }
 
 export class PaymentRemindersPrismaRepository implements PaymentRemindersPersistencePort {
-  async findPropiedadForReminder(propiedadId: string): Promise<PropiedadForReminder | null> {
-    const row = await prisma.propiedad.findUnique({
-      where: { id: propiedadId },
+  async findCuentaForReminder(cuentaId: string): Promise<CuentaForReminder | null> {
+    const row = await prisma.cuenta.findFirst({
+      where: { id: cuentaId, deleted_at: null },
       select: {
         id: true,
         identificador: true,
@@ -58,7 +44,7 @@ export class PaymentRemindersPrismaRepository implements PaymentRemindersPersist
     if (!row) return null;
 
     const lastHistorial = await prisma.historialPago.findFirst({
-      where: { propiedad_id: propiedadId },
+      where: { cuenta_id: cuentaId, deleted_at: null },
       orderBy: [{ created_at: "desc" }, { id: "desc" }],
     });
     const monto_a_la_fecha =
@@ -76,66 +62,39 @@ export class PaymentRemindersPrismaRepository implements PaymentRemindersPersist
     };
   }
 
-  async createQueued(input: {
-    propiedad_id: string;
-    cliente_email: string;
-    subject: string;
-    body_html: string;
-    body_text: string;
-  }): Promise<PaymentReminderEmailRecord> {
-    const row = await prisma.paymentReminderEmail.create({
-      data: {
-        propiedad_id: input.propiedad_id,
-        cliente_email: input.cliente_email,
-        subject: input.subject,
-        body_html: input.body_html,
-        body_text: input.body_text,
-        status: "queued",
-      },
-    });
-    return mapRecord(row);
-  }
-
-  async markSent(input: {
-    id: string;
-    provider_id: string;
+  async createSentEmailGestion(input: {
+    cuenta_id: string;
     sent_at: Date;
-  }): Promise<PaymentReminderEmailRecord> {
-    const row = await prisma.paymentReminderEmail.update({
-      where: { id: input.id },
+    descripcion: string;
+  }): Promise<ReminderGestionRecord> {
+    const row = await prisma.gestion.create({
       data: {
-        status: "sent",
-        provider_id: input.provider_id,
-        sent_at: input.sent_at,
-        error_message: null,
+        cuenta_id: input.cuenta_id,
+        fecha: input.sent_at,
+        tipo: GESTION_TIPO_EMAIL_REMINDER,
+        estado: "enviado",
+        descripcion: input.descripcion,
       },
     });
-    return mapRecord(row);
+    return mapGestion(row);
   }
 
-  async markFailed(input: {
-    id: string;
-    error_message: string;
-  }): Promise<PaymentReminderEmailRecord> {
-    const row = await prisma.paymentReminderEmail.update({
-      where: { id: input.id },
-      data: {
-        status: "failed",
-        error_message: input.error_message,
-      },
+  async findEmailGestionById(id: string): Promise<ReminderGestionRecord | null> {
+    const row = await prisma.gestion.findFirst({
+      where: { id, tipo: GESTION_TIPO_EMAIL_REMINDER },
     });
-    return mapRecord(row);
+    return row ? mapGestion(row) : null;
   }
 
-  async listByPropiedad(
-    propiedadId: string,
+  async listEmailGestionesByCuenta(
+    cuentaId: string,
     limit: number,
-  ): Promise<PaymentReminderEmailWithBody[]> {
-    const rows = await prisma.paymentReminderEmail.findMany({
-      where: { propiedad_id: propiedadId },
-      orderBy: { created_at: "desc" },
+  ): Promise<ReminderGestionRecord[]> {
+    const rows = await prisma.gestion.findMany({
+      where: { cuenta_id: cuentaId, tipo: GESTION_TIPO_EMAIL_REMINDER },
+      orderBy: { fecha: "desc" },
       take: limit,
     });
-    return rows.map(mapRecordWithBody);
+    return rows.map(mapGestion);
   }
 }

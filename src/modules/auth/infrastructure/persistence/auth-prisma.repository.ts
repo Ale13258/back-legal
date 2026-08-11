@@ -3,13 +3,25 @@ import { getIdleCutoffDate } from "../../../../shared/security/session-policy.js
 import type {
   AuthPersistencePort,
   ActiveRefreshToken,
+  ActivateStaffByInvitationInput,
+  ActivateStaffByInvitationResult,
   AuthUserPayload,
+  RegistrationInvitation,
 } from "../../domain/ports/auth-persistence.port.js";
 
 export class AuthPrismaRepository implements AuthPersistencePort {
   findUserByEmail(email: string) {
     return prisma.usuario.findUnique({
       where: { email },
+      select: {
+        id: true,
+        email: true,
+        role: true,
+        cliente_id: true,
+        password_hash: true,
+        is_active: true,
+        activated_at: true,
+      },
     });
   }
 
@@ -31,6 +43,10 @@ export class AuthPrismaRepository implements AuthPersistencePort {
         password_hash: input.password_hash,
         role: input.role,
         cliente_id: input.cliente_id,
+        is_active: true,
+        activated_at: new Date(),
+        activation_token_hash: null,
+        activation_expires_at: null,
       },
     });
 
@@ -40,6 +56,120 @@ export class AuthPrismaRepository implements AuthPersistencePort {
       role: user.role,
       cliente_id: user.cliente_id,
     };
+  }
+
+  async findValidRegistrationInvitation(
+    activation_token_hash: string,
+    now: Date,
+  ): Promise<RegistrationInvitation | null> {
+    const user = await prisma.usuario.findFirst({
+      where: {
+        activation_token_hash,
+        activated_at: null,
+        password_hash: null,
+        is_active: false,
+        activation_expires_at: { gt: now },
+        OR: [
+          {
+            role: { in: ["analista_legal", "abogada_junior"] },
+            cliente_id: null,
+          },
+          {
+            role: "cliente",
+            cliente_id: { not: null },
+          },
+        ],
+      },
+      select: {
+        email: true,
+        role: true,
+        activation_expires_at: true,
+      },
+    });
+
+    if (
+      !user ||
+      user.activation_expires_at == null ||
+      (user.role !== "analista_legal" &&
+        user.role !== "abogada_junior" &&
+        user.role !== "cliente")
+    ) {
+      return null;
+    }
+
+    return {
+      email: user.email,
+      role: user.role,
+      expires_at: user.activation_expires_at,
+    };
+  }
+
+  async activateStaffByInvitation(
+    input: ActivateStaffByInvitationInput,
+  ): Promise<ActivateStaffByInvitationResult | null> {
+    return prisma.$transaction(async (tx) => {
+      const candidate = await tx.usuario.findFirst({
+        where: {
+          activation_token_hash: input.activation_token_hash,
+          activated_at: null,
+          password_hash: null,
+          is_active: false,
+          activation_expires_at: { gt: input.now },
+          OR: [
+            {
+              role: { in: ["analista_legal", "abogada_junior"] },
+              cliente_id: null,
+            },
+            {
+              role: "cliente",
+              cliente_id: { not: null },
+            },
+          ],
+        },
+        select: {
+          id: true,
+          email: true,
+          role: true,
+        },
+      });
+
+      if (
+        !candidate ||
+        (candidate.role !== "analista_legal" &&
+          candidate.role !== "abogada_junior" &&
+          candidate.role !== "cliente")
+      ) {
+        return null;
+      }
+
+      // Compare-and-set: solo una activación concurrente puede ganar.
+      const updated = await tx.usuario.updateMany({
+        where: {
+          id: candidate.id,
+          activation_token_hash: input.activation_token_hash,
+          activated_at: null,
+          password_hash: null,
+          is_active: false,
+        },
+        data: {
+          password_hash: input.password_hash,
+          activated_at: input.now,
+          is_active: true,
+          activation_token_hash: null,
+          activation_expires_at: null,
+        },
+      });
+
+      if (updated.count !== 1) {
+        return null;
+      }
+
+      return {
+        id: candidate.id,
+        email: candidate.email,
+        role: candidate.role,
+      };
+    });
   }
 
   createRefreshToken(input: {
@@ -128,4 +258,3 @@ export class AuthPrismaRepository implements AuthPersistencePort {
     });
   }
 }
-

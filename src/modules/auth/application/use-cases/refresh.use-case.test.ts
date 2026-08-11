@@ -12,7 +12,7 @@ import { RefreshUseCase } from "./refresh.use-case.js";
 
 const payload = {
   id: "user-1",
-  role: "admin" as const,
+  role: "super_admin" as const,
   cliente_id: null,
   email: "admin@test.com",
 };
@@ -24,6 +24,8 @@ function createMocks(savedToken: ActiveRefreshToken | null) {
     findUserByEmail: async () => null,
     findClienteByEmail: async () => null,
     createUserForCliente: async () => payload,
+    findValidRegistrationInvitation: async () => null,
+    activateStaffByInvitation: async () => null,
     createRefreshToken: async () => ({ id: "new-id" }),
     findActiveRefreshToken: async () => savedToken,
     rotateRefreshToken: async () => ({ newRefreshTokenId: "rt-new" }),

@@ -40,7 +40,13 @@ export class LoginUseCase {
 
   async execute(input: LoginInput): Promise<LoginOutput> {
     const user = await this.deps.authPersistence.findUserByEmail(input.email);
-    if (!user) {
+    // Pendientes (sin password/activación) e inactivos: mismo 401 genérico.
+    if (
+      !user ||
+      !user.is_active ||
+      user.activated_at == null ||
+      user.password_hash == null
+    ) {
       throw new ApiError(401, "UNAUTHORIZED", "Credenciales invalidas");
     }
 

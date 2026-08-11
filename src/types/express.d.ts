@@ -1,4 +1,5 @@
 import "express";
+import type { AuthRole } from "../shared/security/roles.js";
 
 declare global {
   namespace Express {
@@ -6,7 +7,7 @@ declare global {
       requestId?: string;
       user?: {
         id: string;
-        role: "admin" | "cliente";
+        role: AuthRole;
         cliente_id: string | null;
         email: string;
       };

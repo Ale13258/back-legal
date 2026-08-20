@@ -152,6 +152,23 @@ describe("SendPaymentReminderEmailUseCase", () => {
     );
   });
 
+  it("400 si cobro_email es null", async () => {
+    const mocks = createMocks();
+    mocks.setCuenta(baseCuenta({ cobro_email: null }));
+    const useCase = new SendPaymentReminderEmailUseCase({
+      persistence: mocks.persistence,
+      emailSender: mocks.emailSender,
+    });
+
+    await assert.rejects(
+      () => useCase.execute(baseInput()),
+      (err: unknown) =>
+        err instanceof ApiError &&
+        err.status === 400 &&
+        err.message === "La cuenta no tiene un email de cobro válido",
+    );
+  });
+
   it("400 si no hay saldo pendiente", async () => {
     const mocks = createMocks();
     mocks.setCuenta(baseCuenta({ monto_a_la_fecha: 0 }));

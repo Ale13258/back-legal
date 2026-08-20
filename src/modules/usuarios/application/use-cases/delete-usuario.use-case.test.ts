@@ -5,7 +5,7 @@ import type {
   StaffUsuario,
   UsuariosPersistencePort,
 } from "../../domain/ports/usuarios-persistence.port.js";
-import { DeactivateUsuarioUseCase } from "./deactivate-usuario.use-case.js";
+import { DeleteUsuarioUseCase } from "./delete-usuario.use-case.js";
 
 function staff(overrides: Partial<StaffUsuario> = {}): StaffUsuario {
   return {
@@ -30,12 +30,7 @@ function createPersistence(
     createPendingStaff: async () => staff({ status: "pending", is_active: false }),
     findPendingStaffById: async () => null,
     rotatePendingInvitation: async () => null,
-    updateStaff: async (id, input) =>
-      staff({
-        id,
-        is_active: input.is_active === false ? false : true,
-        status: input.is_active === false ? "inactive" : "active",
-      }),
+    updateStaff: async () => staff(),
     deleteStaff: async () => true,
     countActiveSuperAdmins: async () => 1,
     revokeAllRefreshTokens: async () => {},
@@ -43,9 +38,9 @@ function createPersistence(
   };
 }
 
-describe("DeactivateUsuarioUseCase", () => {
-  it("rechaza auto-desactivacion", async () => {
-    const useCase = new DeactivateUsuarioUseCase({
+describe("DeleteUsuarioUseCase", () => {
+  it("rechaza auto-eliminacion", async () => {
+    const useCase = new DeleteUsuarioUseCase({
       usuariosPersistence: createPersistence({
         findStaffById: async () => staff({ id: "me" }),
       }),
@@ -61,17 +56,16 @@ describe("DeactivateUsuarioUseCase", () => {
     );
   });
 
-  it("rechaza desactivar a cualquier super_admin", async () => {
-    const revoked: string[] = [];
-    const useCase = new DeactivateUsuarioUseCase({
+  it("rechaza eliminar al ultimo super_admin activo", async () => {
+    const deleted: string[] = [];
+    const useCase = new DeleteUsuarioUseCase({
       usuariosPersistence: createPersistence({
-        findStaffById: async () => staff({ id: "sa-1", role: "super_admin" }),
-        countActiveSuperAdmins: async () => 2,
-        updateStaff: async () => {
-          throw new Error("no debe actualizar");
-        },
-        revokeAllRefreshTokens: async (id) => {
-          revoked.push(id);
+        findStaffById: async () =>
+          staff({ id: "sa-1", role: "super_admin", status: "active", is_active: true }),
+        countActiveSuperAdmins: async () => 1,
+        deleteStaff: async (id) => {
+          deleted.push(id);
+          return true;
         },
       }),
     });
@@ -84,30 +78,38 @@ describe("DeactivateUsuarioUseCase", () => {
         return true;
       },
     );
-    assert.deepEqual(revoked, []);
+    assert.deepEqual(deleted, []);
   });
 
-  it("desactiva staff y revoca refresh tokens", async () => {
-    const revoked: string[] = [];
-    const useCase = new DeactivateUsuarioUseCase({
+  it("elimina staff pendiente", async () => {
+    const deleted: string[] = [];
+    const useCase = new DeleteUsuarioUseCase({
       usuariosPersistence: createPersistence({
-        findStaffById: async () => staff({ id: "u-2" }),
-        countActiveSuperAdmins: async () => 2,
-        updateStaff: async (id, input) =>
-          staff({
-            id,
-            is_active: input.is_active === false ? false : true,
-            status: input.is_active === false ? "inactive" : "active",
-          }),
-        revokeAllRefreshTokens: async (id) => {
-          revoked.push(id);
+        findStaffById: async () =>
+          staff({ id: "u-2", status: "pending", is_active: false }),
+        deleteStaff: async (id) => {
+          deleted.push(id);
+          return true;
         },
       }),
     });
 
-    const result = await useCase.execute({ actorId: "actor", id: "u-2" });
-    assert.equal(result.is_active, false);
-    assert.equal(result.status, "inactive");
-    assert.deepEqual(revoked, ["u-2"]);
+    await useCase.execute({ actorId: "actor", id: "u-2" });
+    assert.deepEqual(deleted, ["u-2"]);
+  });
+
+  it("404 si no existe", async () => {
+    const useCase = new DeleteUsuarioUseCase({
+      usuariosPersistence: createPersistence(),
+    });
+
+    await assert.rejects(
+      () => useCase.execute({ actorId: "actor", id: "missing" }),
+      (error: unknown) => {
+        assert.ok(error instanceof ApiError);
+        assert.equal(error.status, 404);
+        return true;
+      },
+    );
   });
 });

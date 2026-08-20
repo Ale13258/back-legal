@@ -17,6 +17,7 @@ type CuentaDeudorRow = {
     tipo_persona: TipoPersona;
     documento: string;
     emails: string[];
+    telefono: string | null;
   };
 };
 
@@ -31,6 +32,7 @@ export function deudoresFromLinks(
     tipo_persona: link.deudor.tipo_persona,
     documento: link.deudor.documento,
     emails: [...link.deudor.emails],
+    telefono: link.deudor.telefono,
   }));
   if (!cobroDocumento) return mapped;
   return [...mapped].sort((a, b) => {
@@ -65,11 +67,13 @@ export async function syncCuentaDeudores(
         tipo_persona: item.tipo_persona,
         documento: item.documento,
         emails: item.emails,
+        telefono: item.telefono ?? null,
       },
       update: {
         nombre: item.nombre,
         tipo_persona: item.tipo_persona,
         emails: item.emails,
+        telefono: item.telefono ?? null,
       },
     });
 
@@ -86,6 +90,7 @@ export async function syncCuentaDeudores(
       tipo_persona: deudor.tipo_persona,
       documento: deudor.documento,
       emails: [...deudor.emails],
+      telefono: deudor.telefono,
     });
   }
 

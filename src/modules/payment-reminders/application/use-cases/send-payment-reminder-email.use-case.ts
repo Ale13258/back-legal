@@ -46,7 +46,7 @@ export class SendPaymentReminderEmailUseCase {
       );
     }
 
-    const to = cuenta.cobro_email.trim();
+    const to = (cuenta.cobro_email ?? "").trim();
     if (!to) {
       throw new ApiError(
         400,

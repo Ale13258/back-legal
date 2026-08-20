@@ -92,19 +92,19 @@ function mapGestion(row: GestionRow): Gestion {
 }
 
 function assertValidDeudores(deudores: DeudorCobro[]) {
-  if (deudores.length < 1 || deudores.some((d) => d.emails.length < 1)) {
+  if (deudores.length < 1) {
     throw new ApiError(
       400,
       "VALIDATION_ERROR",
-      "Se requiere al menos un deudor con un email de cobro",
+      "Se requiere al menos un deudor de cobro",
     );
   }
   const cobro = cobroFieldsFromDeudores(deudores);
-  if (!cobro.cobro_nombre || !cobro.cobro_documento || !cobro.cobro_email) {
+  if (!cobro.cobro_nombre || !cobro.cobro_documento) {
     throw new ApiError(
       400,
       "VALIDATION_ERROR",
-      "Los datos de cobro (nombre, documento y correo) son obligatorios",
+      "Los datos de cobro (nombre y documento) son obligatorios",
     );
   }
 }
@@ -120,7 +120,7 @@ type CuentaRow = {
   cobro_nombre: string;
   cobro_tipo_persona: TipoPersona;
   cobro_documento: string;
-  cobro_email: string;
+  cobro_email: string | null;
   monto_a_la_fecha: unknown;
   edad_mora_dias: number | null;
   fecha_inicio_cobro: Date | null;
@@ -134,6 +134,7 @@ type CuentaRow = {
       tipo_persona: TipoPersona;
       documento: string;
       emails: string[];
+      telefono: string | null;
     };
   }[];
 };
@@ -263,7 +264,7 @@ export class CuentasPrismaRepository implements CuentasPersistencePort {
     cobro_nombre?: string | undefined;
     cobro_tipo_persona?: TipoPersona | undefined;
     cobro_documento?: string | undefined;
-    cobro_email?: string | undefined;
+    cobro_email?: string | null | undefined;
     fecha_inicio_cobro?: string | null | undefined;
   }): Promise<Cuenta> {
     const existing = await prisma.cuenta.findFirst({
@@ -283,7 +284,7 @@ export class CuentasPrismaRepository implements CuentasPersistencePort {
       cobro_nombre?: string;
       cobro_tipo_persona?: TipoPersona;
       cobro_documento?: string;
-      cobro_email?: string;
+      cobro_email?: string | null;
       fecha_inicio_cobro?: Date | null;
     } = {};
 

@@ -173,7 +173,7 @@ model Cuenta {
   cobro_nombre       String
   cobro_tipo_persona TipoPersona
   cobro_documento    String
-  cobro_email        String
+  cobro_email        String?
 
   monto_a_la_fecha Decimal @default(0) @db.Decimal(14, 2)
 
@@ -204,6 +204,7 @@ model Deudor {
   tipo_persona TipoPersona
   documento    String      @unique
   emails       String[]
+  telefono     String?
 
   cuentas CuentaDeudor[]
 

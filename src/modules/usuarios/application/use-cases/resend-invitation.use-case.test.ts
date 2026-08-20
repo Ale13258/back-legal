@@ -56,6 +56,7 @@ describe("ResendInvitationUseCase", () => {
         });
       },
       updateStaff: async () => pendingStaff(),
+      deleteStaff: async () => true,
       countActiveSuperAdmins: async () => 1,
       revokeAllRefreshTokens: async () => {},
     };
@@ -88,6 +89,7 @@ describe("ResendInvitationUseCase", () => {
       findPendingStaffById: async () => null,
       rotatePendingInvitation: async () => null,
       updateStaff: async () => pendingStaff(),
+      deleteStaff: async () => true,
       countActiveSuperAdmins: async () => 1,
       revokeAllRefreshTokens: async () => {},
     };
@@ -105,5 +107,46 @@ describe("ResendInvitationUseCase", () => {
         return true;
       },
     );
+  });
+
+  it("devuelve EMAIL_SEND_FAILED tipado si falta FRONTEND_URL", async () => {
+    const prev = process.env.FRONTEND_URL;
+    delete process.env.FRONTEND_URL;
+    process.env.GMAIL_FROM = "noreply@legaltech.test";
+
+    const usuariosPersistence: UsuariosPersistencePort = {
+      listStaff: async () => [],
+      findStaffById: async () => pendingStaff(),
+      findByEmail: async () => null,
+      createPendingStaff: async () => pendingStaff(),
+      findPendingStaffById: async () => pendingInvitation(),
+      rotatePendingInvitation: async (_id, input) =>
+        pendingInvitation({ activation_expires_at: input.activation_expires_at }),
+      updateStaff: async () => pendingStaff(),
+      deleteStaff: async () => true,
+      countActiveSuperAdmins: async () => 1,
+      revokeAllRefreshTokens: async () => {},
+    };
+
+    const useCase = new ResendInvitationUseCase({
+      usuariosPersistence,
+      emailSender: { send: async () => ({ provider_id: "x" }) },
+    });
+
+    try {
+      await assert.rejects(
+        () => useCase.execute({ id: "u-1" }),
+        (error: unknown) => {
+          assert.ok(error instanceof ApiError);
+          assert.equal(error.status, 502);
+          assert.equal(error.code, "EMAIL_SEND_FAILED");
+          assert.match(error.message, /FRONTEND_URL/);
+          return true;
+        },
+      );
+    } finally {
+      if (prev === undefined) delete process.env.FRONTEND_URL;
+      else process.env.FRONTEND_URL = prev;
+    }
   });
 });

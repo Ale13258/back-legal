@@ -41,6 +41,7 @@ const deudorCobroSchema = z.object({
 const deudoresSchema = z
   .array(deudorCobroSchema)
   .min(1)
+  .max(10)
   .superRefine((items, ctx) => {
     for (const i of findDuplicateDocumentoIndexes(items)) {
       ctx.addIssue({

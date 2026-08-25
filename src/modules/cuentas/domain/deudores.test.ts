@@ -22,13 +22,25 @@ describe("deudores", () => {
     assert.equal(cobro.cobro_email, " a@b.com ");
   });
 
-  it("normaliza trim en deudores y emails", () => {
+  it("proyecta cobro_email null cuando no hay emails", () => {
+    const cobro = cobroFromDeudor({
+      nombre: "Ana",
+      tipo_persona: "natural",
+      documento: "123",
+      emails: [],
+      telefono: "3001234567",
+    });
+    assert.equal(cobro.cobro_email, null);
+  });
+
+  it("normaliza trim en deudores, emails y telefono", () => {
     const [d] = normalizeDeudores([
       {
         nombre: " Ana ",
         tipo_persona: "juridica",
         documento: " NIT-1 ",
         emails: [" a@b.com ", " c@d.com "],
+        telefono: " 300 ",
       },
     ]);
     assert.deepEqual(d, {
@@ -36,6 +48,25 @@ describe("deudores", () => {
       tipo_persona: "juridica",
       documento: "NIT-1",
       emails: ["a@b.com", "c@d.com"],
+      telefono: "300",
+    });
+  });
+
+  it("acepta deudor sin emails ni telefono", () => {
+    const [d] = normalizeDeudores([
+      {
+        nombre: "Ana",
+        tipo_persona: "natural",
+        documento: "1",
+        emails: [],
+      },
+    ]);
+    assert.deepEqual(d, {
+      nombre: "Ana",
+      tipo_persona: "natural",
+      documento: "1",
+      emails: [],
+      telefono: null,
     });
   });
 
@@ -60,6 +91,25 @@ describe("deudores", () => {
         tipo_persona: "natural",
         documento: "1",
         emails: ["j@j.com"],
+        telefono: null,
+      },
+    ]);
+  });
+
+  it("sintetiza deudores sin email cuando cobro_email es null", () => {
+    const deudores = ensureDeudores(null, {
+      cobro_nombre: "Juan",
+      cobro_tipo_persona: "natural",
+      cobro_documento: "1",
+      cobro_email: null,
+    });
+    assert.deepEqual(deudores, [
+      {
+        nombre: "Juan",
+        tipo_persona: "natural",
+        documento: "1",
+        emails: [],
+        telefono: null,
       },
     ]);
   });
@@ -79,6 +129,7 @@ describe("deudores", () => {
         tipo_persona: "natural",
         documento: "1",
         emails: ["j@j.com"],
+        telefono: null,
       },
     ]);
   });
@@ -103,5 +154,21 @@ describe("deudores", () => {
     );
     assert.deepEqual(next[0]!.emails, ["nuevo@a.com", "a2@a.com"]);
     assert.deepEqual(next[1]!.emails, ["b@b.com"]);
+  });
+
+  it("limpia emails al parchear cobro_email null", () => {
+    const next = patchPrimaryDeudor(
+      [
+        {
+          nombre: "A",
+          tipo_persona: "natural",
+          documento: "1",
+          emails: ["a@a.com", "a2@a.com"],
+          telefono: "300",
+        },
+      ],
+      { cobro_email: null },
+    );
+    assert.deepEqual(next[0]!.emails, []);
   });
 });

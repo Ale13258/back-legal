@@ -2,13 +2,13 @@ import { ensureCreditorForLegacyCliente } from "./ensure-creditor-for-cliente.js
 import { prisma } from "../../../../shared/infrastructure/prisma/prisma.client.js";
 import { ApiError } from "../../../../shared/http/error-handler.js";
 import { Prisma } from "@prisma/client";
-import { getBusinessTodayYmd } from "../../domain/business-calendar.js";
+import { formatYmdInTimeZone, getBusinessTimeZone, getBusinessTodayYmd } from "../../domain/business-calendar.js";
 import {
   ensureDeudores,
   normalizeDeudores,
   patchPrimaryDeudor,
 } from "../../domain/deudores.js";
-import { computeDiasEnMora } from "../../domain/mora.js";
+import { computeDiasEnMora, dateToYmdUtc, resolveEdadMoraDias } from "../../domain/mora.js";
 import { refreshCuentaMoraAggregates } from "./refresh-mora-aggregates.js";
 import { recomputeHistorialSaldosForCuenta } from "./recompute-historial-saldos.js";
 import {
@@ -38,7 +38,7 @@ function ymdToUtcNoon(value: string, field: string): Date {
 }
 
 function cobroDateFromInput(value: string | null | undefined): Date | null {
-  if (value === undefined || value === null) return null;
+  if (value === undefined || value === null || String(value).trim() === "") return null;
   return ymdToUtcNoon(value, "fecha de cobro");
 }
 
@@ -109,6 +109,12 @@ function assertValidDeudores(deudores: DeudorCobro[]) {
   }
 }
 
+type HistorialMoraRow = {
+  periodo: string;
+  estado_pago: EstadoPago;
+  fecha_pago: Date | null;
+};
+
 type CuentaRow = {
   id: string;
   cliente_id: string;
@@ -127,6 +133,7 @@ type CuentaRow = {
   fecha_fin_cobro: Date | null;
   created_at: Date;
   updated_at: Date;
+  historial_pagos?: HistorialMoraRow[];
   cuenta_deudores?: {
     deudor: {
       id: string;
@@ -138,6 +145,14 @@ type CuentaRow = {
     };
   }[];
 };
+
+const cuentaReadInclude = {
+  ...cuentaDeudoresInclude,
+  historial_pagos: {
+    where: { deleted_at: null },
+    select: { periodo: true, estado_pago: true, fecha_pago: true },
+  },
+} as const;
 
 function mapCuenta(row: CuentaRow): Cuenta {
   const fromLinks =
@@ -153,6 +168,18 @@ function mapCuenta(row: CuentaRow): Cuenta {
       cobro_email: row.cobro_email,
     });
   const cobro = cobroFieldsFromDeudores(deudores);
+  const todayYmd = getBusinessTodayYmd();
+  const createdAtYmd = formatYmdInTimeZone(row.created_at, getBusinessTimeZone());
+  const inicioYmd = row.fecha_inicio_cobro ? dateToYmdUtc(row.fecha_inicio_cobro) : null;
+  const edadViva = resolveEdadMoraDias({
+    movimientos: row.historial_pagos ?? [],
+    fechaInicioCobroYmd: inicioYmd,
+    createdAtYmd,
+    referenceTodayYmd: todayYmd,
+  });
+  const fechaInicioCobro =
+    row.fecha_inicio_cobro ??
+    (createdAtYmd ? new Date(`${createdAtYmd}T12:00:00.000Z`) : null);
   return {
     id: row.id,
     cliente_id: row.cliente_id,
@@ -167,8 +194,8 @@ function mapCuenta(row: CuentaRow): Cuenta {
     cobro_email: cobro.cobro_email,
     deudores,
     monto_a_la_fecha: row.monto_a_la_fecha,
-    edad_mora_dias: row.edad_mora_dias,
-    fecha_inicio_cobro: row.fecha_inicio_cobro,
+    edad_mora_dias: edadViva ?? row.edad_mora_dias,
+    fecha_inicio_cobro: fechaInicioCobro,
     fecha_fin_cobro: row.fecha_fin_cobro,
     created_at: row.created_at,
     updated_at: row.updated_at,
@@ -186,7 +213,7 @@ export class CuentasPrismaRepository implements CuentasPersistencePort {
         ...(input.tipo_cuenta ? { tipo_cuenta: input.tipo_cuenta } : {}),
         deleted_at: null,
       },
-      include: cuentaDeudoresInclude,
+      include: cuentaReadInclude,
       orderBy: { created_at: "desc" },
     });
     return rows.map((row) => mapCuenta(row as CuentaRow));
@@ -195,7 +222,7 @@ export class CuentasPrismaRepository implements CuentasPersistencePort {
   async getCuentaById(id: string): Promise<Cuenta | null> {
     const row = await prisma.cuenta.findFirst({
       where: { id, deleted_at: null },
-      include: cuentaDeudoresInclude,
+      include: cuentaReadInclude,
     });
     return row ? mapCuenta(row as CuentaRow) : null;
   }
@@ -235,7 +262,9 @@ export class CuentasPrismaRepository implements CuentasPersistencePort {
           cobro_tipo_persona: cobro.cobro_tipo_persona,
           cobro_documento: cobro.cobro_documento,
           cobro_email: cobro.cobro_email,
-          fecha_inicio_cobro: cobroDateFromInput(input.fecha_inicio_cobro),
+          fecha_inicio_cobro:
+            cobroDateFromInput(input.fecha_inicio_cobro) ??
+            cobroDateFromInput(getBusinessTodayYmd()),
         },
       });
 
@@ -246,7 +275,7 @@ export class CuentasPrismaRepository implements CuentasPersistencePort {
 
       return tx.cuenta.findUniqueOrThrow({
         where: { id: cuenta.id },
-        include: cuentaDeudoresInclude,
+        include: cuentaReadInclude,
       });
     });
 
@@ -269,7 +298,7 @@ export class CuentasPrismaRepository implements CuentasPersistencePort {
   }): Promise<Cuenta> {
     const existing = await prisma.cuenta.findFirst({
       where: { id: input.id, deleted_at: null },
-      include: cuentaDeudoresInclude,
+      include: cuentaReadInclude,
     });
     if (!existing) {
       throw new ApiError(404, "NOT_FOUND", "Cuenta no encontrada");
@@ -357,7 +386,7 @@ export class CuentasPrismaRepository implements CuentasPersistencePort {
 
       return tx.cuenta.findUniqueOrThrow({
         where: { id: input.id },
-        include: cuentaDeudoresInclude,
+        include: cuentaReadInclude,
       });
     });
 

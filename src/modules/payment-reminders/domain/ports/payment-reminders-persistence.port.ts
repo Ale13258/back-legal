@@ -4,7 +4,7 @@ export type CuentaForReminder = {
   direccion: string | null;
   monto_a_la_fecha: number;
   cobro_nombre: string;
-  cobro_email: string;
+  cobro_email: string | null;
 };
 
 export type ReminderGestionRecord = {

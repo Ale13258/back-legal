@@ -194,6 +194,17 @@ export class UsuariosPrismaRepository implements UsuariosPersistencePort {
     return toStaffUsuario(updated);
   }
 
+  async deleteStaff(id: string): Promise<boolean> {
+    const result = await prisma.usuario.deleteMany({
+      where: {
+        id,
+        role: { in: [...STAFF_ROLES] },
+        cliente_id: null,
+      },
+    });
+    return result.count > 0;
+  }
+
   countActiveSuperAdmins(): Promise<number> {
     return prisma.usuario.count({
       where: {

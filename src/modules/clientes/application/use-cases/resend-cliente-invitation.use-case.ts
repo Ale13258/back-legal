@@ -62,15 +62,14 @@ export class ResendClienteInvitationUseCase {
       throw new ApiError(409, "CONFLICT", "La invitacion ya no esta pendiente");
     }
 
-    const registration_url = buildRegistrationInvitationUrl(token);
-    const content = buildCreditorPortalInvitationEmail({
-      to: cliente.email,
-      creditor_name: cliente.nombre,
-      registration_url,
-      expires_at: activation_expires_at,
-    });
-
     try {
+      const registration_url = buildRegistrationInvitationUrl(token);
+      const content = buildCreditorPortalInvitationEmail({
+        to: cliente.email,
+        creditor_name: cliente.nombre,
+        registration_url,
+        expires_at: activation_expires_at,
+      });
       await this.deps.emailSender.send({
         from: resolveOutboundFrom({ from_name: "LegalTech" }),
         to: cliente.email,
@@ -82,10 +81,11 @@ export class ResendClienteInvitationUseCase {
       if (error instanceof ApiError) {
         throw error;
       }
+      const detail = error instanceof Error ? error.message : "Error al enviar correo";
       throw new ApiError(
         502,
         "EMAIL_SEND_FAILED",
-        "Token renovado, pero no se pudo enviar la invitacion",
+        `Token renovado, pero no se pudo enviar la invitacion: ${detail}`,
       );
     }
 

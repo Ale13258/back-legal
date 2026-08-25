@@ -13,6 +13,7 @@ import {
   LEGALTECH_TENANT_DOCUMENTO,
   LEGALTECH_TENANT_EMAIL,
 } from "../../../cuentas/infrastructure/persistence/ensure-creditor-for-cliente.js";
+import { CuentasPrismaRepository } from "../../../cuentas/infrastructure/persistence/cuentas-prisma.repository.js";
 
 /** Tenant SaaS interno: no es cliente de cartera y no debe listarse en la UI. */
 const notLegalTechTenant = {
@@ -46,6 +47,7 @@ clientesRouter.use(requireAuth);
 const emailSender = new NodemailerGmailEmailSender();
 const createClienteUseCase = new CreateClienteUseCase({ emailSender });
 const resendClienteInvitationUseCase = new ResendClienteInvitationUseCase({ emailSender });
+const cuentasRepo = new CuentasPrismaRepository();
 
 clientesRouter.get("/", requireStaff(), async (req, res, next) => {
   try {
@@ -136,10 +138,8 @@ clientesRouter.patch("/:id", requireOwnershipOrStaff("id"), async (req, res, nex
 
 clientesRouter.get("/:id/cuentas", requireOwnershipOrStaff("id"), async (req, res, next) => {
   try {
-    const items = await prisma.cuenta.findMany({
-      where: { cliente_id: req.params.id, deleted_at: null },
-      orderBy: { created_at: "desc" },
-    });
+    // Mismo mapper que GET /cuentas y GET /cuentas/:id: incluye deudores[] completo.
+    const items = await cuentasRepo.listCuentas({ cliente_id: req.params.id });
     res.json({ items });
   } catch (error) {
     next(error);

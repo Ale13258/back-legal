@@ -6,6 +6,7 @@ import { formatYmdInTimeZone, getBusinessTimeZone, getBusinessTodayYmd } from ".
 import {
   ensureDeudores,
   normalizeDeudores,
+  overlayPrimaryFromCobroSnapshot,
   patchPrimaryDeudor,
 } from "../../domain/deudores.js";
 import { computeDiasEnMora, dateToYmdUtc, resolveEdadMoraDias } from "../../domain/mora.js";
@@ -155,19 +156,20 @@ const cuentaReadInclude = {
 } as const;
 
 function mapCuenta(row: CuentaRow): Cuenta {
+  const cobroSnapshot = {
+    cobro_nombre: row.cobro_nombre,
+    cobro_tipo_persona: row.cobro_tipo_persona,
+    cobro_documento: row.cobro_documento,
+    cobro_email: row.cobro_email,
+  };
   const fromLinks =
     row.cuenta_deudores && row.cuenta_deudores.length > 0
       ? deudoresFromLinks(row.cuenta_deudores, row.cobro_documento)
       : null;
-  const deudores =
-    fromLinks ??
-    ensureDeudores(null, {
-      cobro_nombre: row.cobro_nombre,
-      cobro_tipo_persona: row.cobro_tipo_persona,
-      cobro_documento: row.cobro_documento,
-      cobro_email: row.cobro_email,
-    });
-  const cobro = cobroFieldsFromDeudores(deudores);
+  const deudores = overlayPrimaryFromCobroSnapshot(
+    fromLinks ?? ensureDeudores(null, cobroSnapshot),
+    cobroSnapshot,
+  );
   const todayYmd = getBusinessTodayYmd();
   const createdAtYmd = formatYmdInTimeZone(row.created_at, getBusinessTimeZone());
   const inicioYmd = row.fecha_inicio_cobro ? dateToYmdUtc(row.fecha_inicio_cobro) : null;
@@ -188,10 +190,10 @@ function mapCuenta(row: CuentaRow): Cuenta {
     identificador: row.identificador,
     direccion: row.direccion,
     notas: row.notas,
-    cobro_nombre: cobro.cobro_nombre,
-    cobro_tipo_persona: cobro.cobro_tipo_persona,
-    cobro_documento: cobro.cobro_documento,
-    cobro_email: cobro.cobro_email,
+    cobro_nombre: cobroSnapshot.cobro_nombre,
+    cobro_tipo_persona: cobroSnapshot.cobro_tipo_persona,
+    cobro_documento: cobroSnapshot.cobro_documento,
+    cobro_email: cobroSnapshot.cobro_email,
     deudores,
     monto_a_la_fecha: row.monto_a_la_fecha,
     edad_mora_dias: edadViva ?? row.edad_mora_dias,

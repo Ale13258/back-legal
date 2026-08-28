@@ -6,6 +6,7 @@ import {
   findDuplicateDocumentoIndexes,
   normalizeDeudores,
   parseStoredDeudores,
+  overlayPrimaryFromCobroSnapshot,
   patchPrimaryDeudor,
 } from "./deudores.js";
 
@@ -31,6 +32,29 @@ describe("deudores", () => {
       telefono: "3001234567",
     });
     assert.equal(cobro.cobro_email, null);
+  });
+
+  it("el snapshot cobro_* de la unidad gana sobre el deudor maestro compartido", () => {
+    const deudores = overlayPrimaryFromCobroSnapshot(
+      [
+        {
+          nombre: "Catalina Campo",
+          tipo_persona: "natural",
+          documento: "1023456789",
+          emails: ["ocampocatalina9@gmail.com"],
+          telefono: "3001112222",
+        },
+      ],
+      {
+        cobro_nombre: "Juan Pérez",
+        cobro_tipo_persona: "natural",
+        cobro_documento: "1.023.456.789",
+        cobro_email: "juan@unidad.com",
+      },
+    );
+    assert.equal(deudores[0]?.nombre, "Juan Pérez");
+    assert.equal(deudores[0]?.emails[0], "juan@unidad.com");
+    assert.equal(deudores[0]?.telefono, "3001112222");
   });
 
   it("normaliza trim en deudores, emails y telefono", () => {

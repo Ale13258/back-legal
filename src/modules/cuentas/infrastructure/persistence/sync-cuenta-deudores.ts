@@ -44,8 +44,8 @@ export function deudoresFromLinks(
 
 /**
  * Reemplaza los vínculos de una cuenta.
- * Upsert de deudor por documento (reutilizable en otras cuentas).
- * La intermedia solo guarda cuenta_id + deudor_id.
+ * Reutiliza deudor por documento, pero no pisa nombre/correo si otras unidades ya lo usan.
+ * El nombre visible de cada unidad queda en cobro_* de la cuenta.
  */
 export async function syncCuentaDeudores(
   tx: Prisma.TransactionClient,
@@ -60,22 +60,41 @@ export async function syncCuentaDeudores(
 
   const linked: DeudorCobro[] = [];
   for (const item of deudores) {
-    const deudor = await tx.deudor.upsert({
+    const existing = await tx.deudor.findUnique({
       where: { documento: item.documento },
-      create: {
-        nombre: item.nombre,
-        tipo_persona: item.tipo_persona,
-        documento: item.documento,
-        emails: item.emails,
-        telefono: item.telefono ?? null,
-      },
-      update: {
-        nombre: item.nombre,
-        tipo_persona: item.tipo_persona,
-        emails: item.emails,
-        telefono: item.telefono ?? null,
-      },
     });
+    let deudor = existing;
+    if (!existing) {
+      deudor = await tx.deudor.create({
+        data: {
+          nombre: item.nombre,
+          tipo_persona: item.tipo_persona,
+          documento: item.documento,
+          emails: item.emails,
+          telefono: item.telefono ?? null,
+        },
+      });
+    } else {
+      // Si otras unidades ya usan este deudor, no pisar su nombre/correo.
+      const otherLinks = await tx.cuentaDeudor.count({
+        where: { deudor_id: existing.id },
+      });
+      if (otherLinks === 0) {
+        deudor = await tx.deudor.update({
+          where: { id: existing.id },
+          data: {
+            nombre: item.nombre,
+            tipo_persona: item.tipo_persona,
+            emails: item.emails,
+            telefono: item.telefono ?? null,
+          },
+        });
+      }
+    }
+
+    if (!deudor) {
+      throw new Error("No se pudo resolver el deudor de cobro");
+    }
 
     await tx.cuentaDeudor.create({
       data: {
@@ -86,11 +105,11 @@ export async function syncCuentaDeudores(
 
     linked.push({
       id: deudor.id,
-      nombre: deudor.nombre,
-      tipo_persona: deudor.tipo_persona,
-      documento: deudor.documento,
-      emails: [...deudor.emails],
-      telefono: deudor.telefono,
+      nombre: item.nombre,
+      tipo_persona: item.tipo_persona,
+      documento: item.documento,
+      emails: [...item.emails],
+      telefono: item.telefono ?? deudor.telefono,
     });
   }
 

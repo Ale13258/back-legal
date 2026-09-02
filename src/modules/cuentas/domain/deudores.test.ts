@@ -54,7 +54,28 @@ describe("deudores", () => {
     );
     assert.equal(deudores[0]?.nombre, "Juan Pérez");
     assert.equal(deudores[0]?.emails[0], "juan@unidad.com");
+    assert.deepEqual(deudores[0]?.emails, ["juan@unidad.com"]);
     assert.equal(deudores[0]?.telefono, "3001112222");
+  });
+
+  it("no mezcla en una unidad los correos extra de la ficha global de deudor", () => {
+    const deudores = overlayPrimaryFromCobroSnapshot(
+      [
+        {
+          nombre: "Deudor compartido",
+          tipo_persona: "natural",
+          documento: "1234567890",
+          emails: ["becharadeborge@gmail.com", "clarabotero@gmail.com"],
+        },
+      ],
+      {
+        cobro_nombre: "Deudor compartido",
+        cobro_tipo_persona: "natural",
+        cobro_documento: "1234567890",
+        cobro_email: "becharadeborge@gmail.com",
+      },
+    );
+    assert.deepEqual(deudores[0]?.emails, ["becharadeborge@gmail.com"]);
   });
 
   it("normaliza trim en deudores, emails y telefono", () => {

@@ -42,19 +42,14 @@ export function overlayPrimaryFromCobroSnapshot(
   const idx = deudores.findIndex((d) => sameDocumento(d.documento, snapshot.documento));
   if (idx < 0) return deudores;
   const current = deudores[idx]!;
-  const primaryEmail = snapshot.emails[0];
-  const emails = primaryEmail
-    ? [
-        primaryEmail,
-        ...current.emails.filter((e) => e.toLowerCase() !== primaryEmail.toLowerCase()),
-      ]
-    : current.emails;
   const primary: DeudorCobro = {
     ...current,
     nombre: snapshot.nombre || current.nombre,
     tipo_persona: snapshot.tipo_persona,
     documento: snapshot.documento || current.documento,
-    emails,
+    // Solo el correo de ESTA unidad. Los extras de la ficha global se filtraban
+    // a otras propiedades como si se agregaran por defecto.
+    emails: snapshot.emails.length ? snapshot.emails : current.emails,
     telefono: current.telefono ?? snapshot.telefono ?? null,
   };
   return [primary, ...deudores.filter((_, i) => i !== idx)];

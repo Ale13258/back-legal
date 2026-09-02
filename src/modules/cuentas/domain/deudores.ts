@@ -15,6 +15,51 @@ export function cobroFromDeudor(deudor: DeudorCobro): CobroFields {
   };
 }
 
+/** Clave para saber si dos documentos son la misma persona (puntos/guiones no cuentan). */
+export function documentoKey(documento: string): string {
+  const trimmed = documento.trim().toLowerCase();
+  const digits = trimmed.replace(/\D/g, "");
+  return digits.length >= 5 ? digits : trimmed;
+}
+
+function sameDocumento(a: string, b: string): boolean {
+  const ka = documentoKey(a);
+  const kb = documentoKey(b);
+  return ka.length > 0 && ka === kb;
+}
+
+/**
+ * El deudor maestro es reutilizable entre unidades. El nombre/correo de *esta*
+ * cuenta viven en cobro_*: si coinciden el documento, esa ficha gana.
+ */
+export function overlayPrimaryFromCobroSnapshot(
+  deudores: DeudorCobro[],
+  cobro: CobroFields,
+): DeudorCobro[] {
+  const snapshot = normalizeDeudor(deudorFromCobro(cobro));
+  if (!deudores.length) return [snapshot];
+  if (deudores.length > 1) return deudores;
+  const idx = deudores.findIndex((d) => sameDocumento(d.documento, snapshot.documento));
+  if (idx < 0) return deudores;
+  const current = deudores[idx]!;
+  const primaryEmail = snapshot.emails[0];
+  const emails = primaryEmail
+    ? [
+        primaryEmail,
+        ...current.emails.filter((e) => e.toLowerCase() !== primaryEmail.toLowerCase()),
+      ]
+    : current.emails;
+  const primary: DeudorCobro = {
+    ...current,
+    nombre: snapshot.nombre || current.nombre,
+    tipo_persona: snapshot.tipo_persona,
+    documento: snapshot.documento || current.documento,
+    emails,
+    telefono: current.telefono ?? snapshot.telefono ?? null,
+  };
+  return [primary, ...deudores.filter((_, i) => i !== idx)];
+}
+
 export function deudorFromCobro(cobro: CobroFields): DeudorCobro {
   const email = cobro.cobro_email?.trim();
   return {

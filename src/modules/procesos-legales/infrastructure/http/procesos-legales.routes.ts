@@ -41,24 +41,6 @@ function toProcesoResponse(row: ProcesoConCuenta) {
 export const procesosLegalesRouter = Router();
 procesosLegalesRouter.use(requireAuth);
 
-/** Listado staff: evita N+1 del dashboard (antes: GET por cada cliente). */
-procesosLegalesRouter.get("/", requireStaff(), async (_req, res, next) => {
-  try {
-    const rows = await prisma.procesoLegal.findMany({
-      where: {
-        deleted_at: null,
-        cuenta: { deleted_at: null },
-      },
-      include: { cuenta: { select: { cliente_id: true } } },
-      orderBy: { created_at: "desc" },
-    });
-    const items = rows.map((row) => toProcesoResponse(row));
-    res.json({ items });
-  } catch (error) {
-    next(error);
-  }
-});
-
 procesosLegalesRouter.get("/:id", async (req, res, next) => {
   try {
     const item = await prisma.procesoLegal.findFirst({

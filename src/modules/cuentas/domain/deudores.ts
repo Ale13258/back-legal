@@ -22,7 +22,7 @@ export function documentoKey(documento: string): string {
   return digits.length >= 5 ? digits : trimmed;
 }
 
-function sameDocumento(a: string, b: string): boolean {
+export function sameDocumento(a: string, b: string): boolean {
   const ka = documentoKey(a);
   const kb = documentoKey(b);
   return ka.length > 0 && ka === kb;
@@ -53,6 +53,21 @@ export function overlayPrimaryFromCobroSnapshot(
     telefono: current.telefono ?? snapshot.telefono ?? null,
   };
   return [primary, ...deudores.filter((_, i) => i !== idx)];
+}
+
+/**
+ * Deudores de ESTA unidad: cobro_* (lo guardado en la propiedad) + personas extra
+ * vinculadas con otro documento. No se copian correos de la ficha global.
+ */
+export function buildDeudoresForCuenta(
+  cobro: CobroFields,
+  linked: DeudorCobro[],
+): DeudorCobro[] {
+  const primary = normalizeDeudor(deudorFromCobro(cobro));
+  const extras = linked.filter((d) => !sameDocumento(d.documento, primary.documento));
+  const hasPrimary = Boolean(primary.nombre || primary.documento || primary.emails.length);
+  if (!hasPrimary) return extras.length ? extras : linked;
+  return extras.length ? [primary, ...extras] : [primary];
 }
 
 export function deudorFromCobro(cobro: CobroFields): DeudorCobro {

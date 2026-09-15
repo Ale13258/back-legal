@@ -9,10 +9,31 @@ import {
 } from "../../../../shared/security/auth.middleware.js";
 import { CreateClienteUseCase } from "../../application/use-cases/create-cliente.use-case.js";
 import { ResendClienteInvitationUseCase } from "../../application/use-cases/resend-cliente-invitation.use-case.js";
+import { deriveClientePortalStatus } from "../../domain/portal-status.js";
 import {
   LEGALTECH_TENANT_DOCUMENTO,
   LEGALTECH_TENANT_EMAIL,
 } from "../../../cuentas/infrastructure/persistence/ensure-creditor-for-cliente.js";
+
+const portalUsuarioSelect = {
+  activated_at: true,
+  is_active: true,
+  activation_expires_at: true,
+} as const;
+
+function withPortalStatus<T extends { id: string }>(
+  cliente: T,
+  usuarios: Array<{
+    activated_at: Date | null;
+    is_active: boolean;
+    activation_expires_at: Date | null;
+  }>,
+) {
+  return {
+    ...cliente,
+    portal_status: deriveClientePortalStatus(usuarios[0] ?? null),
+  };
+}
 
 /** Tenant SaaS interno: no es cliente de cartera y no debe listarse en la UI. */
 const notLegalTechTenant = {
@@ -55,7 +76,7 @@ clientesRouter.get("/", requireStaff(), async (req, res, next) => {
         ? req.query.tipo_persona
         : undefined;
 
-    const items = await prisma.cliente.findMany({
+    const rows = await prisma.cliente.findMany({
       where: {
         ...notLegalTechTenant,
         ...(tipo_persona ? { tipo_persona } : {}),
@@ -69,8 +90,17 @@ clientesRouter.get("/", requireStaff(), async (req, res, next) => {
             }
           : {}),
       },
+      include: {
+        usuarios: {
+          where: { role: "cliente" },
+          select: portalUsuarioSelect,
+          orderBy: { created_at: "desc" },
+          take: 1,
+        },
+      },
       orderBy: { created_at: "desc" },
     });
+    const items = rows.map(({ usuarios, ...cliente }) => withPortalStatus(cliente, usuarios));
     res.json({ items });
   } catch (error) {
     next(error);
@@ -79,11 +109,20 @@ clientesRouter.get("/", requireStaff(), async (req, res, next) => {
 
 clientesRouter.get("/:id", requireOwnershipOrStaff("id"), async (req, res, next) => {
   try {
-    const item = await prisma.cliente.findFirst({
+    const row = await prisma.cliente.findFirst({
       where: { id: req.params.id, ...notLegalTechTenant },
+      include: {
+        usuarios: {
+          where: { role: "cliente" },
+          select: portalUsuarioSelect,
+          orderBy: { created_at: "desc" },
+          take: 1,
+        },
+      },
     });
-    if (!item) return res.status(404).json({ code: "NOT_FOUND", message: "Cliente no encontrado" });
-    res.json(item);
+    if (!row) return res.status(404).json({ code: "NOT_FOUND", message: "Cliente no encontrado" });
+    const { usuarios, ...cliente } = row;
+    res.json(withPortalStatus(cliente, usuarios));
   } catch (error) {
     next(error);
   }
@@ -102,7 +141,7 @@ clientesRouter.post("/", requireStaff(), async (req, res, next) => {
       });
     }
     const created = await createClienteUseCase.execute(dto);
-    res.status(201).json(created);
+    res.status(201).json({ ...created, portal_status: "pending" as const });
   } catch (error) {
     next(error);
   }
@@ -111,7 +150,7 @@ clientesRouter.post("/", requireStaff(), async (req, res, next) => {
 clientesRouter.post("/:id/resend-invitation", requireStaff(), async (req, res, next) => {
   try {
     const item = await resendClienteInvitationUseCase.execute({ id: req.params.id });
-    res.json(item);
+    res.json({ ...item, portal_status: "pending" as const });
   } catch (error) {
     next(error);
   }
@@ -120,7 +159,17 @@ clientesRouter.post("/:id/resend-invitation", requireStaff(), async (req, res, n
 clientesRouter.patch("/:id", requireOwnershipOrStaff("id"), async (req, res, next) => {
   try {
     const dto = clientePatchSchema.parse(req.body);
-    const existing = await prisma.cliente.findUnique({ where: { id: req.params.id } });
+    const existing = await prisma.cliente.findUnique({
+      where: { id: req.params.id },
+      include: {
+        usuarios: {
+          where: { role: "cliente" },
+          select: portalUsuarioSelect,
+          orderBy: { created_at: "desc" },
+          take: 1,
+        },
+      },
+    });
     if (!existing) {
       return res.status(404).json({ code: "NOT_FOUND", message: "Cliente no encontrado" });
     }
@@ -128,7 +177,7 @@ clientesRouter.patch("/:id", requireOwnershipOrStaff("id"), async (req, res, nex
       where: { id: req.params.id },
       data: dto,
     });
-    res.json(updated);
+    res.json(withPortalStatus(updated, existing.usuarios));
   } catch (error) {
     next(error);
   }

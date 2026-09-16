@@ -66,13 +66,22 @@ function deudorWriteData(clienteId: string, item: DeudorCobro) {
   };
 }
 
+/** Vínculos a otras unidades vivas. Las borradas no cuentan: se puede recrear la misma. */
+export function otherActiveCuentaDeudorWhere(deudorId: string, cuentaId: string) {
+  return {
+    deudor_id: deudorId,
+    cuenta_id: { not: cuentaId },
+    cuenta: { deleted_at: null },
+  };
+}
+
 async function otherCuentaLinks(
   tx: Prisma.TransactionClient,
   deudorId: string,
   cuentaId: string,
 ): Promise<number> {
   return tx.cuentaDeudor.count({
-    where: { deudor_id: deudorId, cuenta_id: { not: cuentaId } },
+    where: otherActiveCuentaDeudorWhere(deudorId, cuentaId),
   });
 }
 

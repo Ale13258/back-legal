@@ -422,6 +422,13 @@ export class CuentasPrismaRepository implements CuentasPersistencePort {
           where: { cuenta_id: id, deleted_at: null },
           data: { deleted_at: deletedAt },
         });
+
+        // Suelta deudores y radicados para poder crear de nuevo la misma unidad/número.
+        await tx.cuentaDeudor.deleteMany({ where: { cuenta_id: id } });
+        await tx.procesoLegal.updateMany({
+          where: { cuenta_id: id, deleted_at: null },
+          data: { deleted_at: deletedAt },
+        });
       });
     } catch (error) {
       if (error instanceof ApiError) {

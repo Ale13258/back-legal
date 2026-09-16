@@ -104,6 +104,7 @@ model Cliente {
   cuentas   Cuenta[]
   creditors Creditor[]
   usuarios  Usuario[]
+  deudores  Deudor[]
 
   created_at DateTime @default(now())
   updated_at DateTime @updatedAt
@@ -177,6 +178,9 @@ model Cuenta {
 
   monto_a_la_fecha Decimal @default(0) @db.Decimal(14, 2)
 
+  /// Honorarios negociados (override). Null = usar % sugerido en front según etapa.
+  honorarios_monto Decimal? @db.Decimal(14, 2)
+
   edad_mora_dias Int?
   fecha_inicio_cobro DateTime? @db.Date
   fecha_fin_cobro    DateTime? @db.Date
@@ -197,12 +201,15 @@ model Cuenta {
   @@map("cuentas")
 }
 
-/// Persona/entidad a quien se cobra (no pertenece al Cliente).
+/// Persona/entidad a quien se cobra. Aislado por conjunto (`cliente_id`):
+/// no se reutiliza el mismo deudor entre clientes distintos.
 model Deudor {
   id           String      @id @default(uuid())
+  cliente_id   String
+  cliente      Cliente     @relation(fields: [cliente_id], references: [id])
   nombre       String
   tipo_persona TipoPersona
-  documento    String      @unique
+  documento    String
   emails       String[]
   telefono     String?
 
@@ -211,6 +218,8 @@ model Deudor {
   created_at DateTime @default(now())
   updated_at DateTime @updatedAt
 
+  @@index([cliente_id], map: "idx_deudores_cliente_id")
+  @@index([cliente_id, documento], map: "idx_deudores_cliente_documento")
   @@map("deudores")
 }
 
@@ -261,7 +270,10 @@ model ProcesoLegal {
   cuenta_id String
   cuenta    Cuenta @relation(fields: [cuenta_id], references: [id])
 
-  numero_cuenta String              @unique
+  /// Unicidad entre filas vivas: índice SQL parcial
+  /// `procesos_legales_numero_cuenta_active_key` (WHERE deleted_at IS NULL).
+  /// Prisma no modela UNIQUE parcial; no reponer `@unique` o migrate recrea el global.
+  numero_cuenta String
   tipo          TipoProcesoLegal
   estado        EstadoProcesoLegal
   etapa_proceso EtapaProceso

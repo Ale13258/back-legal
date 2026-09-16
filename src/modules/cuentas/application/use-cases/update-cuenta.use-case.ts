@@ -22,6 +22,7 @@ export class UpdateCuentaUseCase {
     cobro_documento?: string;
     cobro_email?: string | null;
     fecha_inicio_cobro?: string | null;
+    honorarios_monto?: number | null;
   }): Promise<Cuenta> {
     return this.deps.cuentasPersistence.updateCuenta(input);
   }

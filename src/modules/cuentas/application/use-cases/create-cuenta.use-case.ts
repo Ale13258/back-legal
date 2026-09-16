@@ -16,6 +16,7 @@ export class CreateCuentaUseCase {
     notas?: string;
     saldo_inicial?: number;
     fecha_inicio_cobro?: string | null;
+    honorarios_monto?: number | null;
     deudores: DeudorCobro[];
   }): Promise<Cuenta> {
     return this.deps.cuentasPersistence.createCuenta({

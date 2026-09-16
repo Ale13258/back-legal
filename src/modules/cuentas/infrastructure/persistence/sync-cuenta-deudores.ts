@@ -1,6 +1,11 @@
 import type { Prisma } from "@prisma/client";
 import type { DeudorCobro, TipoPersona } from "../../domain/ports/cuentas-persistence.port.js";
-import { cobroFromDeudor, normalizeDeudores } from "../../domain/deudores.js";
+import {
+  cobroFromDeudor,
+  isReusableDeudorDocumento,
+  normalizeDeudores,
+  sameDocumento,
+} from "../../domain/deudores.js";
 
 export const cuentaDeudoresInclude = {
   cuenta_deudores: {
@@ -18,6 +23,14 @@ type CuentaDeudorRow = {
     documento: string;
     emails: string[];
     telefono: string | null;
+  };
+};
+
+type PreviousLink = {
+  deudor_id: string;
+  deudor: {
+    cliente_id: string;
+    documento: string;
   };
 };
 
@@ -42,59 +55,113 @@ export function deudoresFromLinks(
   });
 }
 
+function deudorWriteData(clienteId: string, item: DeudorCobro) {
+  return {
+    cliente_id: clienteId,
+    nombre: item.nombre,
+    tipo_persona: item.tipo_persona,
+    documento: item.documento,
+    emails: item.emails,
+    telefono: item.telefono ?? null,
+  };
+}
+
+async function otherCuentaLinks(
+  tx: Prisma.TransactionClient,
+  deudorId: string,
+  cuentaId: string,
+): Promise<number> {
+  return tx.cuentaDeudor.count({
+    where: { deudor_id: deudorId, cuenta_id: { not: cuentaId } },
+  });
+}
+
+async function resolveDeudorForSync(
+  tx: Prisma.TransactionClient,
+  input: {
+    clienteId: string;
+    cuentaId: string;
+    item: DeudorCobro;
+    previousLinks: PreviousLink[];
+  },
+) {
+  const { clienteId, cuentaId, item, previousLinks } = input;
+
+  if (isReusableDeudorDocumento(item.documento)) {
+    const existing = await tx.deudor.findFirst({
+      where: { cliente_id: clienteId, documento: item.documento },
+    });
+    if (!existing) {
+      return tx.deudor.create({ data: deudorWriteData(clienteId, item) });
+    }
+    if ((await otherCuentaLinks(tx, existing.id, cuentaId)) === 0) {
+      return tx.deudor.update({
+        where: { id: existing.id },
+        data: {
+          nombre: item.nombre,
+          tipo_persona: item.tipo_persona,
+          emails: item.emails,
+          telefono: item.telefono ?? null,
+        },
+      });
+    }
+    return existing;
+  }
+
+  const previous = previousLinks.find(
+    (link) =>
+      link.deudor.cliente_id === clienteId &&
+      sameDocumento(link.deudor.documento, item.documento),
+  );
+  if (previous && (await otherCuentaLinks(tx, previous.deudor_id, cuentaId)) === 0) {
+    return tx.deudor.update({
+      where: { id: previous.deudor_id },
+      data: {
+        nombre: item.nombre,
+        tipo_persona: item.tipo_persona,
+        documento: item.documento,
+        emails: item.emails,
+        telefono: item.telefono ?? null,
+      },
+    });
+  }
+
+  return tx.deudor.create({ data: deudorWriteData(clienteId, item) });
+}
+
 /**
  * Reemplaza los vínculos de una cuenta.
- * Reutiliza deudor por documento, pero no pisa nombre/correo si otras unidades ya lo usan.
- * El nombre visible de cada unidad queda en cobro_* de la cuenta.
+ * Reutiliza deudor por documento solo dentro del mismo conjunto y si el
+ * documento no es placeholder. El correo visible de cada unidad queda en cobro_*.
  */
 export async function syncCuentaDeudores(
   tx: Prisma.TransactionClient,
   input: {
     cuentaId: string;
+    clienteId: string;
     deudores: DeudorCobro[];
   },
 ): Promise<DeudorCobro[]> {
   const deudores = normalizeDeudores(input.deudores);
 
+  const previousLinks = await tx.cuentaDeudor.findMany({
+    where: { cuenta_id: input.cuentaId },
+    select: {
+      deudor_id: true,
+      deudor: { select: { cliente_id: true, documento: true } },
+    },
+  });
+
   await tx.cuentaDeudor.deleteMany({ where: { cuenta_id: input.cuentaId } });
 
   const linked: DeudorCobro[] = [];
   for (const item of deudores) {
-    const existing = await tx.deudor.findUnique({
-      where: { documento: item.documento },
+    const deudor = await resolveDeudorForSync(tx, {
+      clienteId: input.clienteId,
+      cuentaId: input.cuentaId,
+      item,
+      previousLinks,
     });
-    let deudor = existing;
-    if (!existing) {
-      deudor = await tx.deudor.create({
-        data: {
-          nombre: item.nombre,
-          tipo_persona: item.tipo_persona,
-          documento: item.documento,
-          emails: item.emails,
-          telefono: item.telefono ?? null,
-        },
-      });
-    } else {
-      // Si otras unidades ya usan este deudor, no pisar su nombre/correo.
-      const otherLinks = await tx.cuentaDeudor.count({
-        where: { deudor_id: existing.id },
-      });
-      if (otherLinks === 0) {
-        deudor = await tx.deudor.update({
-          where: { id: existing.id },
-          data: {
-            nombre: item.nombre,
-            tipo_persona: item.tipo_persona,
-            emails: item.emails,
-            telefono: item.telefono ?? null,
-          },
-        });
-      }
-    }
-
-    if (!deudor) {
-      throw new Error("No se pudo resolver el deudor de cobro");
-    }
 
     await tx.cuentaDeudor.create({
       data: {

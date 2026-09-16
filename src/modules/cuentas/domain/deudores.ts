@@ -28,6 +28,27 @@ export function sameDocumento(a: string, b: string): boolean {
   return ka.length > 0 && ka === kb;
 }
 
+const PLACEHOLDER_DIGIT_SEQUENCES = new Set([
+  "0123456789",
+  "1234567890",
+  "123456789",
+  "9876543210",
+  "987654321",
+]);
+
+/**
+ * Documentos "reales" se pueden reutilizar entre unidades del mismo conjunto.
+ * Placeholders (1234567890, 111111111, CC de 1 dígito, etc.) no: cada unidad
+ * debe tener su propio deudor para no mezclar correos entre personas distintas.
+ */
+export function isReusableDeudorDocumento(documento: string): boolean {
+  const digits = documento.replace(/\D/g, "");
+  if (digits.length < 6) return false;
+  if (/^(\d)\1+$/.test(digits)) return false;
+  if (PLACEHOLDER_DIGIT_SEQUENCES.has(digits)) return false;
+  return true;
+}
+
 /**
  * El deudor maestro es reutilizable entre unidades. El nombre/correo de *esta*
  * cuenta viven en cobro_*: si coinciden el documento, esa ficha gana.
@@ -38,7 +59,6 @@ export function overlayPrimaryFromCobroSnapshot(
 ): DeudorCobro[] {
   const snapshot = normalizeDeudor(deudorFromCobro(cobro));
   if (!deudores.length) return [snapshot];
-  if (deudores.length > 1) return deudores;
   const idx = deudores.findIndex((d) => sameDocumento(d.documento, snapshot.documento));
   if (idx < 0) return deudores;
   const current = deudores[idx]!;

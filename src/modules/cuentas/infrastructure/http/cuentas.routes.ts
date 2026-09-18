@@ -93,6 +93,11 @@ const cuentaBaseSchema = z.object({
   notas: z.string().optional(),
   saldo_inicial: z.coerce.number().min(0).optional(),
   fecha_inicio_cobro: optionalYmdOrNull,
+  /** Null limpia el override negociado. */
+  honorarios_monto: z.preprocess(
+    (val) => (val === "" ? null : val),
+    z.union([z.coerce.number().min(0), z.null()]).optional(),
+  ),
   deudores: deudoresSchema.optional(),
   cobro_nombre: z.string().trim().min(1).optional(),
   cobro_tipo_persona: z.enum(["natural", "juridica"]).optional(),
@@ -233,6 +238,7 @@ cuentasRouter.post("/", requireStaff(), async (req, res, next) => {
       saldo_inicial: dto.saldo_inicial,
       deudores,
       fecha_inicio_cobro: dto.fecha_inicio_cobro,
+      honorarios_monto: dto.honorarios_monto,
     });
     res.status(201).json(created);
   } catch (error) {
@@ -256,6 +262,7 @@ cuentasRouter.patch("/:id", requireStaff(), async (req, res, next) => {
       cobro_documento: dto.deudores ? undefined : dto.cobro_documento,
       cobro_email: dto.deudores ? undefined : dto.cobro_email,
       fecha_inicio_cobro: dto.fecha_inicio_cobro,
+      honorarios_monto: dto.honorarios_monto,
     });
     res.json(updated);
   } catch (error) {

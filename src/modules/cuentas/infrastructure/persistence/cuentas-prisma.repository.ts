@@ -129,6 +129,7 @@ type CuentaRow = {
   cobro_documento: string;
   cobro_email: string | null;
   monto_a_la_fecha: unknown;
+  honorarios_monto: unknown | null;
   edad_mora_dias: number | null;
   fecha_inicio_cobro: Date | null;
   fecha_fin_cobro: Date | null;
@@ -196,6 +197,7 @@ function mapCuenta(row: CuentaRow): Cuenta {
     cobro_email: cobroSnapshot.cobro_email,
     deudores,
     monto_a_la_fecha: row.monto_a_la_fecha,
+    honorarios_monto: row.honorarios_monto ?? null,
     edad_mora_dias: edadViva ?? row.edad_mora_dias,
     fecha_inicio_cobro: fechaInicioCobro,
     fecha_fin_cobro: row.fecha_fin_cobro,
@@ -237,6 +239,7 @@ export class CuentasPrismaRepository implements CuentasPersistencePort {
     notas?: string | undefined;
     saldo_inicial?: number | undefined;
     fecha_inicio_cobro?: string | null | undefined;
+    honorarios_monto?: number | null | undefined;
     deudores: DeudorCobro[];
   }): Promise<Cuenta> {
     const cliente = await prisma.cliente.findUnique({ where: { id: input.cliente_id } });
@@ -260,6 +263,7 @@ export class CuentasPrismaRepository implements CuentasPersistencePort {
           direccion: input.direccion,
           notas: input.notas,
           monto_a_la_fecha: input.saldo_inicial ?? 0,
+          honorarios_monto: input.honorarios_monto ?? null,
           cobro_nombre: cobro.cobro_nombre,
           cobro_tipo_persona: cobro.cobro_tipo_persona,
           cobro_documento: cobro.cobro_documento,
@@ -272,6 +276,7 @@ export class CuentasPrismaRepository implements CuentasPersistencePort {
 
       await syncCuentaDeudores(tx, {
         cuentaId: cuenta.id,
+        clienteId: input.cliente_id,
         deudores,
       });
 
@@ -297,6 +302,7 @@ export class CuentasPrismaRepository implements CuentasPersistencePort {
     cobro_documento?: string | undefined;
     cobro_email?: string | null | undefined;
     fecha_inicio_cobro?: string | null | undefined;
+    honorarios_monto?: number | null | undefined;
   }): Promise<Cuenta> {
     const existing = await prisma.cuenta.findFirst({
       where: { id: input.id, deleted_at: null },
@@ -312,6 +318,7 @@ export class CuentasPrismaRepository implements CuentasPersistencePort {
       direccion?: string;
       notas?: string;
       monto_a_la_fecha?: number;
+      honorarios_monto?: number | null;
       cobro_nombre?: string;
       cobro_tipo_persona?: TipoPersona;
       cobro_documento?: string;
@@ -324,6 +331,7 @@ export class CuentasPrismaRepository implements CuentasPersistencePort {
     if (input.direccion !== undefined) data.direccion = input.direccion;
     if (input.notas !== undefined) data.notas = input.notas;
     if (input.saldo_inicial !== undefined) data.monto_a_la_fecha = input.saldo_inicial;
+    if (input.honorarios_monto !== undefined) data.honorarios_monto = input.honorarios_monto;
     if (input.fecha_inicio_cobro !== undefined) {
       data.fecha_inicio_cobro = cobroDateFromInput(input.fecha_inicio_cobro);
     }
@@ -382,6 +390,7 @@ export class CuentasPrismaRepository implements CuentasPersistencePort {
       if (nextDeudores) {
         await syncCuentaDeudores(tx, {
           cuentaId: input.id,
+          clienteId: existing.cliente_id,
           deudores: nextDeudores,
         });
       }
@@ -410,6 +419,13 @@ export class CuentasPrismaRepository implements CuentasPersistencePort {
 
         // El historial se conserva, pero queda fuera de cálculos y listados operativos.
         await tx.historialPago.updateMany({
+          where: { cuenta_id: id, deleted_at: null },
+          data: { deleted_at: deletedAt },
+        });
+
+        // Suelta deudores y radicados para poder crear de nuevo la misma unidad/número.
+        await tx.cuentaDeudor.deleteMany({ where: { cuenta_id: id } });
+        await tx.procesoLegal.updateMany({
           where: { cuenta_id: id, deleted_at: null },
           data: { deleted_at: deletedAt },
         });

@@ -7,6 +7,7 @@ import { procesosLegalesRouter } from "../modules/procesos-legales/infrastructur
 import { gestionesRouter } from "../modules/gestiones/infrastructure/http/gestiones.routes.js";
 import { metricsRouter } from "../modules/metrics/infrastructure/http/metrics.routes.js";
 import { paymentRemindersRouter } from "../modules/payment-reminders/infrastructure/http/payment-reminders.routes.js";
+import { pqrsRouter } from "../modules/pqrs/infrastructure/http/pqrs.routes.js";
 import { tutelasRouter } from "../modules/tutelas/infrastructure/http/tutelas.routes.js";
 import { usuariosRouter } from "../modules/usuarios/infrastructure/http/usuarios.routes.js";
 
@@ -42,3 +43,4 @@ v1Router.use("/gestiones", gestionesRouter);
 v1Router.use("/metrics", metricsRouter);
 v1Router.use("/payment-reminders", paymentRemindersRouter);
 v1Router.use("/tutelas", tutelasRouter);
+v1Router.use("/pqrs", pqrsRouter);

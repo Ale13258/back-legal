@@ -37,6 +37,26 @@ function withPortalStatus<T extends { id: string }>(
   };
 }
 
+const portalUsuarioSelect = {
+  activated_at: true,
+  is_active: true,
+  activation_expires_at: true,
+} as const;
+
+function withPortalStatus<T extends { id: string }>(
+  cliente: T,
+  usuarios: Array<{
+    activated_at: Date | null;
+    is_active: boolean;
+    activation_expires_at: Date | null;
+  }>,
+) {
+  return {
+    ...cliente,
+    portal_status: deriveClientePortalStatus(usuarios[0] ?? null),
+  };
+}
+
 /** Tenant SaaS interno: no es cliente de cartera y no debe listarse en la UI. */
 const notLegalTechTenant = {
   NOT: {

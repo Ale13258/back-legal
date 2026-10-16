@@ -28,53 +28,6 @@ export function sameDocumento(a: string, b: string): boolean {
   return ka.length > 0 && ka === kb;
 }
 
-const PLACEHOLDER_DIGIT_SEQUENCES = new Set([
-  "0123456789",
-  "1234567890",
-  "123456789",
-  "9876543210",
-  "987654321",
-]);
-
-/**
- * Documentos "reales" se pueden reutilizar entre unidades del mismo conjunto.
- * Placeholders (1234567890, 111111111, CC de 1 dígito, etc.) no: cada unidad
- * debe tener su propio deudor para no mezclar correos entre personas distintas.
- */
-export function isReusableDeudorDocumento(documento: string): boolean {
-  const digits = documento.replace(/\D/g, "");
-  if (digits.length < 6) return false;
-  if (/^(\d)\1+$/.test(digits)) return false;
-  if (PLACEHOLDER_DIGIT_SEQUENCES.has(digits)) return false;
-  return true;
-}
-
-/**
- * El deudor maestro es reutilizable entre unidades. El nombre/correo de *esta*
- * cuenta viven en cobro_*: si coinciden el documento, esa ficha gana.
- */
-export function overlayPrimaryFromCobroSnapshot(
-  deudores: DeudorCobro[],
-  cobro: CobroFields,
-): DeudorCobro[] {
-  const snapshot = normalizeDeudor(deudorFromCobro(cobro));
-  if (!deudores.length) return [snapshot];
-  const idx = deudores.findIndex((d) => sameDocumento(d.documento, snapshot.documento));
-  if (idx < 0) return deudores;
-  const current = deudores[idx]!;
-  const primary: DeudorCobro = {
-    ...current,
-    nombre: snapshot.nombre || current.nombre,
-    tipo_persona: snapshot.tipo_persona,
-    documento: snapshot.documento || current.documento,
-    // Solo el correo de ESTA unidad. Los extras de la ficha global se filtraban
-    // a otras propiedades como si se agregaran por defecto.
-    emails: snapshot.emails.length ? snapshot.emails : current.emails,
-    telefono: current.telefono ?? snapshot.telefono ?? null,
-  };
-  return [primary, ...deudores.filter((_, i) => i !== idx)];
-}
-
 /**
  * Deudores de ESTA unidad: cobro_* (lo guardado en la propiedad) + personas extra
  * vinculadas con otro documento. No se copian correos de la ficha global.

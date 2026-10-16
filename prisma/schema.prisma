@@ -161,6 +161,56 @@ model Tutela {
   @@map("tutelas")
 }
 
+/// Derechos de petición / PQR radicados ante entidades (seguimiento interno).
+model Pqr {
+  id               String    @id @default(uuid())
+  /// Legacy: iniciales importadas del Excel (AO, NB…). El responsable real es `responsable_id`.
+  gestion          String?
+  /// Usuario del staff que lleva la PQR.
+  responsable_id   String?
+  responsable      Usuario?  @relation(fields: [responsable_id], references: [id])
+  solicitante      String
+  entidad          String
+  asunto           String
+  fecha_radicacion DateTime  @db.Date
+  radicado         String?
+  /// Por defecto 15 días hábiles desde la radicación; editable.
+  vencimiento      DateTime? @db.Date
+  estado           String?
+  /// Cerrada: respondida o sin trámite pendiente; no genera más alertas.
+  cerrada          Boolean   @default(false)
+
+  alerta_por_vencer_enviada_at DateTime?
+  alerta_vencida_enviada_at    DateTime?
+
+  /// Soft delete: la fila se conserva para trazabilidad; `deleted_by` = email de quien la eliminó.
+  deleted_at DateTime?
+  deleted_by String?
+  created_at DateTime  @default(now())
+  updated_at DateTime  @updatedAt
+
+  @@index([vencimiento], map: "idx_pqrs_vencimiento")
+  @@index([responsable_id], map: "idx_pqrs_responsable")
+  @@map("pqrs")
+}
+
+/// Trazabilidad de tutelas y PQR: cada alta, cambio o eliminación con sus valores antes/después.
+model HistorialCambio {
+  id            String   @id @default(uuid())
+  /// "tutela" | "pqr"
+  entidad       String
+  registro_id   String
+  /// "creada" | "actualizada" | "eliminada"
+  accion        String
+  /// [{ campo, antes, despues }]
+  cambios       Json
+  usuario_email String?
+  created_at    DateTime @default(now())
+
+  @@index([entidad, registro_id, created_at], map: "idx_historial_registro")
+  @@map("historial_cambios")
+}
+
 /// Acreedor (cliente del cliente SaaS): entrega cartera a cobrar.
 /// Fase 1–2: cuelga del tenant (`cliente_id`); las cuentas aún conservan `cliente_id` legacy.
 model Creditor {
@@ -199,6 +249,7 @@ model Usuario {
   activated_at           DateTime?
 
   refresh_tokens RefreshToken[]
+  pqrs           Pqr[]
 
   created_at DateTime @default(now())
   updated_at DateTime @updatedAt

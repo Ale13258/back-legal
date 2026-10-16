@@ -1,24 +1,18 @@
 import { Router } from "express";
-import { z } from "zod";
-import { ETAPA_PROCESO_VALUES } from "../../domain/etapa-proceso.js";
+import {
+  assertNumeroCuentaDisponible,
+  type ActiveProcesoByNumeroFinder,
+} from "../../application/assert-numero-cuenta-disponible.js";
 import { prisma } from "../../../../shared/infrastructure/prisma/prisma.client.js";
 import {
   requireAuth,
   requireStaff,
 } from "../../../../shared/security/auth.middleware.js";
 import { ApiError } from "../../../../shared/http/error-handler.js";
-
-const createSchema = z.object({
-  cuenta_id: z.string().uuid(),
-  /** Ignorado: compat con front que aún lo envía; el dueño sale de la cuenta. */
-  cliente_id: z.string().uuid().optional(),
-  numero_cuenta: z.string().min(1),
-  tipo: z.enum(["juridica", "extrajudicial", "acuerdo_de_pago"]),
-  estado: z.enum(["activa", "cerrada", "en_proceso"]),
-  etapa_proceso: z.enum(ETAPA_PROCESO_VALUES),
-});
-
-const patchSchema = createSchema.omit({ numero_cuenta: true, cliente_id: true }).partial();
+import {
+  createProcesoLegalSchema,
+  patchProcesoLegalSchema,
+} from "./procesos-legales.schemas.js";
 
 type ProcesoConCuenta = {
   cuenta: { cliente_id: string };
@@ -37,6 +31,10 @@ function toProcesoResponse(row: ProcesoConCuenta) {
   const { cuenta, ...proceso } = row;
   return { ...proceso, cliente_id: cuenta.cliente_id };
 }
+
+const numeroCuentaRepo: ActiveProcesoByNumeroFinder = {
+  findFirst: (args) => prisma.procesoLegal.findFirst(args),
+};
 
 export const procesosLegalesRouter = Router();
 procesosLegalesRouter.use(requireAuth);
@@ -77,7 +75,7 @@ procesosLegalesRouter.get("/:id", async (req, res, next) => {
 
 procesosLegalesRouter.post("/", requireStaff(), async (req, res, next) => {
   try {
-    const { cliente_id: _ignored, ...dto } = createSchema.parse(req.body);
+    const { cliente_id: _ignored, ...dto } = createProcesoLegalSchema.parse(req.body);
     const cuenta = await prisma.cuenta.findFirst({
       where: { id: dto.cuenta_id, deleted_at: null },
       select: { id: true, cliente_id: true },
@@ -85,6 +83,7 @@ procesosLegalesRouter.post("/", requireStaff(), async (req, res, next) => {
     if (!cuenta) {
       throw new ApiError(404, "NOT_FOUND", "Cuenta no encontrada");
     }
+    await assertNumeroCuentaDisponible(numeroCuentaRepo, dto.numero_cuenta);
     const created = await prisma.procesoLegal.create({
       data: dto,
       include: { cuenta: { select: { cliente_id: true } } },
@@ -97,7 +96,7 @@ procesosLegalesRouter.post("/", requireStaff(), async (req, res, next) => {
 
 procesosLegalesRouter.patch("/:id", requireStaff(), async (req, res, next) => {
   try {
-    const dto = patchSchema.parse(req.body);
+    const dto = patchProcesoLegalSchema.parse(req.body);
     const existing = await prisma.procesoLegal.findFirst({
       where: { id: req.params.id, deleted_at: null },
     });
@@ -112,6 +111,13 @@ procesosLegalesRouter.patch("/:id", requireStaff(), async (req, res, next) => {
       if (!cuenta) {
         throw new ApiError(404, "NOT_FOUND", "Cuenta no encontrada");
       }
+    }
+    if (dto.numero_cuenta) {
+      await assertNumeroCuentaDisponible(
+        numeroCuentaRepo,
+        dto.numero_cuenta,
+        req.params.id,
+      );
     }
     const updated = await prisma.procesoLegal.update({
       where: { id: req.params.id },

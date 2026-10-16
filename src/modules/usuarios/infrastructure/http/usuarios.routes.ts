@@ -10,7 +10,9 @@ import {
   CreateUsuarioUseCase,
   INVITABLE_STAFF_ROLES,
 } from "../../application/use-cases/create-usuario.use-case.js";
+import { ActivateUsuarioUseCase } from "../../application/use-cases/activate-usuario.use-case.js";
 import { DeactivateUsuarioUseCase } from "../../application/use-cases/deactivate-usuario.use-case.js";
+import { DeleteUsuarioUseCase } from "../../application/use-cases/delete-usuario.use-case.js";
 import { GetUsuarioUseCase } from "../../application/use-cases/get-usuario.use-case.js";
 import { ListUsuariosUseCase } from "../../application/use-cases/list-usuarios.use-case.js";
 import { ResendInvitationUseCase } from "../../application/use-cases/resend-invitation.use-case.js";
@@ -47,6 +49,8 @@ const getUsuarioUseCase = new GetUsuarioUseCase({ usuariosPersistence });
 const createUsuarioUseCase = new CreateUsuarioUseCase({ usuariosPersistence, emailSender });
 const updateUsuarioUseCase = new UpdateUsuarioUseCase({ usuariosPersistence, emailSender });
 const deactivateUsuarioUseCase = new DeactivateUsuarioUseCase({ usuariosPersistence });
+const activateUsuarioUseCase = new ActivateUsuarioUseCase({ usuariosPersistence });
+const deleteUsuarioUseCase = new DeleteUsuarioUseCase({ usuariosPersistence });
 const resendInvitationUseCase = new ResendInvitationUseCase({
   usuariosPersistence,
   emailSender,
@@ -112,13 +116,39 @@ usuariosRouter.patch("/:id", async (req, res, next) => {
   }
 });
 
-usuariosRouter.delete("/:id", async (req, res, next) => {
+/** Soft-deactivate (usuarios ya activados). */
+usuariosRouter.post("/:id/deactivate", async (req, res, next) => {
   try {
     const updated = await deactivateUsuarioUseCase.execute({
       actorId: req.user!.id,
       id: req.params.id,
     });
     res.json(updated);
+  } catch (error) {
+    next(error);
+  }
+});
+
+/** Reactivar usuario inactivo (no aplica a pendientes). */
+usuariosRouter.post("/:id/activate", async (req, res, next) => {
+  try {
+    const updated = await activateUsuarioUseCase.execute({
+      id: req.params.id,
+    });
+    res.json(updated);
+  } catch (error) {
+    next(error);
+  }
+});
+
+/** Hard delete (pendientes, activos o inactivos). */
+usuariosRouter.delete("/:id", async (req, res, next) => {
+  try {
+    await deleteUsuarioUseCase.execute({
+      actorId: req.user!.id,
+      id: req.params.id,
+    });
+    res.status(204).send();
   } catch (error) {
     next(error);
   }

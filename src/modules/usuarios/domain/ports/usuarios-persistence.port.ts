@@ -66,6 +66,8 @@ export interface UsuariosPersistencePort {
     input: RotatePendingInvitationInput,
   ): Promise<PendingStaffInvitation | null>;
   updateStaff(id: string, input: UpdateStaffUsuarioInput): Promise<StaffUsuario>;
+  /** Hard delete de staff (cascade refresh tokens). false si no existía. */
+  deleteStaff(id: string): Promise<boolean>;
   countActiveSuperAdmins(): Promise<number>;
   revokeAllRefreshTokens(usuario_id: string): Promise<void>;
 }

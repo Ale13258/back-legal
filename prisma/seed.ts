@@ -14,7 +14,7 @@ const LEGALTECH_TENANT = {
 
 const DEFAULT_STAFF: Array<{ email: string; password: string; role: Role }> = [
   {
-    email: process.env.SEED_ADMIN_EMAIL || "admin@legaltech.com",
+    email: process.env.SEED_ADMIN_EMAIL || "sucete@abogadosdigitales.com.co",
     password: process.env.SEED_ADMIN_PASSWORD || "admin123",
     role: "super_admin",
   },

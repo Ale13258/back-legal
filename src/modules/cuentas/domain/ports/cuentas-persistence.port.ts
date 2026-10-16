@@ -21,7 +21,7 @@ export type CobroFields = {
   cobro_nombre: string;
   cobro_tipo_persona: TipoPersona;
   cobro_documento: string;
-  cobro_email: string;
+  cobro_email: string | null;
 };
 
 export type DeudorCobro = {
@@ -30,8 +30,9 @@ export type DeudorCobro = {
   nombre: string;
   tipo_persona: TipoPersona;
   documento: string;
-  /** Al menos 1. cobro_email = emails[0]. */
+  /** Puede estar vacío. cobro_email = emails[0] ?? null. */
   emails: string[];
+  telefono?: string | null;
 };
 
 export type Cuenta = {
@@ -46,10 +47,12 @@ export type Cuenta = {
   cobro_nombre: string;
   cobro_tipo_persona: TipoPersona;
   cobro_documento: string;
-  cobro_email: string;
+  cobro_email: string | null;
   /** Siempre len >= 1. cobro_* = proyección de deudores[0]. Persistidos en tablas deudores + cuenta_deudores. */
   deudores: DeudorCobro[];
   monto_a_la_fecha: unknown; // Prisma Decimal (runtime) -> JSON compatible
+  /** Null = sin override; el front calcula % según etapa. */
+  honorarios_monto: unknown | null;
   edad_mora_dias: number | null;
   fecha_inicio_cobro: Date | null;
   fecha_fin_cobro: Date | null;
@@ -107,6 +110,8 @@ export interface CuentasPersistencePort {
     notas?: string;
     saldo_inicial?: number;
     fecha_inicio_cobro?: string | null;
+    /** Null limpia; número >= 0 persiste override negociado. */
+    honorarios_monto?: number | null;
     deudores: DeudorCobro[];
   }): Promise<Cuenta>;
 
@@ -123,8 +128,10 @@ export interface CuentasPersistencePort {
     cobro_nombre?: string;
     cobro_tipo_persona?: TipoPersona;
     cobro_documento?: string;
-    cobro_email?: string;
+    cobro_email?: string | null;
     fecha_inicio_cobro?: string | null;
+    /** Null limpia; número >= 0 persiste override negociado. */
+    honorarios_monto?: number | null;
   }): Promise<Cuenta>;
 
   deleteCuentaCascade(id: string): Promise<void>;

@@ -58,15 +58,14 @@ export class ResendInvitationUseCase {
       );
     }
 
-    const registration_url = buildRegistrationInvitationUrl(token);
-    const content = buildStaffInvitationEmail({
-      to: rotated.email,
-      registration_url,
-      role_label: roleLabel(rotated.role),
-      expires_at: activation_expires_at,
-    });
-
     try {
+      const registration_url = buildRegistrationInvitationUrl(token);
+      const content = buildStaffInvitationEmail({
+        to: rotated.email,
+        registration_url,
+        role_label: roleLabel(rotated.role),
+        expires_at: activation_expires_at,
+      });
       await this.deps.emailSender.send({
         from: resolveOutboundFrom({ from_name: "LegalTech" }),
         to: rotated.email,
@@ -78,10 +77,11 @@ export class ResendInvitationUseCase {
       if (error instanceof ApiError) {
         throw error;
       }
+      const detail = error instanceof Error ? error.message : "Error al enviar correo";
       throw new ApiError(
         502,
         "EMAIL_SEND_FAILED",
-        "Token renovado, pero no se pudo enviar la invitacion",
+        `Token renovado, pero no se pudo enviar la invitacion: ${detail}`,
       );
     }
 

@@ -22,16 +22,26 @@ import {
 } from "../../domain/deudores.js";
 import type { DeudorCobro } from "../../domain/ports/cuentas-persistence.port.js";
 
+const optionalEmail = z.preprocess(
+  (val) => (val === "" ? null : val),
+  z.string().trim().email().nullable().optional(),
+);
+
 const deudorCobroSchema = z.object({
   nombre: z.string().trim().min(1),
   tipo_persona: z.enum(["natural", "juridica"]),
   documento: z.string().trim().min(1),
-  emails: z.array(z.string().trim().email()).min(1),
+  emails: z.array(z.string().trim().email()).default([]),
+  telefono: z.preprocess(
+    (val) => (val === "" ? null : val),
+    z.string().trim().min(1).nullable().optional(),
+  ),
 });
 
 const deudoresSchema = z
   .array(deudorCobroSchema)
   .min(1)
+  .max(10)
   .superRefine((items, ctx) => {
     for (const i of findDuplicateDocumentoIndexes(items)) {
       ctx.addIssue({
@@ -46,7 +56,7 @@ const cobroFieldsSchema = z.object({
   cobro_nombre: z.string().trim().min(1),
   cobro_tipo_persona: z.enum(["natural", "juridica"]),
   cobro_documento: z.string().trim().min(1),
-  cobro_email: z.string().trim().email(),
+  cobro_email: optionalEmail,
 });
 
 function normalizeYmdInput(val: unknown): unknown {
@@ -83,11 +93,16 @@ const cuentaBaseSchema = z.object({
   notas: z.string().optional(),
   saldo_inicial: z.coerce.number().min(0).optional(),
   fecha_inicio_cobro: optionalYmdOrNull,
+  /** Null limpia el override negociado. */
+  honorarios_monto: z.preprocess(
+    (val) => (val === "" ? null : val),
+    z.union([z.coerce.number().min(0), z.null()]).optional(),
+  ),
   deudores: deudoresSchema.optional(),
   cobro_nombre: z.string().trim().min(1).optional(),
   cobro_tipo_persona: z.enum(["natural", "juridica"]).optional(),
   cobro_documento: z.string().trim().min(1).optional(),
-  cobro_email: z.string().trim().email().optional(),
+  cobro_email: optionalEmail,
 });
 
 const cuentaCreateSchema = cuentaBaseSchema.superRefine((data, ctx) => {
@@ -96,7 +111,6 @@ const cuentaCreateSchema = cuentaBaseSchema.superRefine((data, ctx) => {
   if (!data.cobro_nombre) missing.push("cobro_nombre");
   if (!data.cobro_tipo_persona) missing.push("cobro_tipo_persona");
   if (!data.cobro_documento) missing.push("cobro_documento");
-  if (!data.cobro_email) missing.push("cobro_email");
   for (const path of missing) {
     ctx.addIssue({
       code: "custom",
@@ -129,9 +143,9 @@ function resolveDeudoresForCreate(dto: z.infer<typeof cuentaCreateSchema>): Deud
     cobro_nombre: dto.cobro_nombre,
     cobro_tipo_persona: dto.cobro_tipo_persona,
     cobro_documento: dto.cobro_documento,
-    cobro_email: dto.cobro_email,
+    cobro_email: dto.cobro_email ?? null,
   });
-  return [deudorFromCobro(cobro)];
+  return [deudorFromCobro({ ...cobro, cobro_email: cobro.cobro_email ?? null })];
 }
 
 const historialCreateSchema = z
@@ -224,6 +238,7 @@ cuentasRouter.post("/", requireStaff(), async (req, res, next) => {
       saldo_inicial: dto.saldo_inicial,
       deudores,
       fecha_inicio_cobro: dto.fecha_inicio_cobro,
+      honorarios_monto: dto.honorarios_monto,
     });
     res.status(201).json(created);
   } catch (error) {
@@ -247,6 +262,7 @@ cuentasRouter.patch("/:id", requireStaff(), async (req, res, next) => {
       cobro_documento: dto.deudores ? undefined : dto.cobro_documento,
       cobro_email: dto.deudores ? undefined : dto.cobro_email,
       fecha_inicio_cobro: dto.fecha_inicio_cobro,
+      honorarios_monto: dto.honorarios_monto,
     });
     res.json(updated);
   } catch (error) {

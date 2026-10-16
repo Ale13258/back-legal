@@ -13,5 +13,15 @@
       "src": "/(.*)",
       "dest": "src/main.ts"
     }
+  ],
+  "crons": [
+    {
+      "path": "/api/v1/tutelas/alertas/cron",
+      "schedule": "0 13 * * *"
+    },
+    {
+      "path": "/api/v1/pqrs/alertas/cron",
+      "schedule": "5 13 * * *"
+    }
   ]
 }

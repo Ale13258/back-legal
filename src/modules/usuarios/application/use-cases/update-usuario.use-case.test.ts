@@ -32,6 +32,7 @@ describe("UpdateUsuarioUseCase", () => {
       updateStaff: async () => {
         throw new Error("no debe actualizar");
       },
+      deleteStaff: async () => true,
       countActiveSuperAdmins: async () => 1,
       revokeAllRefreshTokens: async () => {},
     };

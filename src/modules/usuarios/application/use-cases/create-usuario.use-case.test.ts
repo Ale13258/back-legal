@@ -42,6 +42,7 @@ describe("CreateUsuarioUseCase", () => {
       findPendingStaffById: async () => null,
       rotatePendingInvitation: async () => null,
       updateStaff: async () => pendingStaff(),
+      deleteStaff: async () => true,
       countActiveSuperAdmins: async () => 1,
       revokeAllRefreshTokens: async () => {},
     };
@@ -82,6 +83,7 @@ describe("CreateUsuarioUseCase", () => {
       findPendingStaffById: async () => null,
       rotatePendingInvitation: async () => null,
       updateStaff: async () => pendingStaff(),
+      deleteStaff: async () => true,
       countActiveSuperAdmins: async () => 1,
       revokeAllRefreshTokens: async () => {},
     };
@@ -113,6 +115,7 @@ describe("CreateUsuarioUseCase", () => {
       findPendingStaffById: async () => null,
       rotatePendingInvitation: async () => null,
       updateStaff: async () => pendingStaff(),
+      deleteStaff: async () => true,
       countActiveSuperAdmins: async () => 1,
       revokeAllRefreshTokens: async () => {},
     };

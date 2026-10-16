@@ -14,6 +14,28 @@ import {
   LEGALTECH_TENANT_DOCUMENTO,
   LEGALTECH_TENANT_EMAIL,
 } from "../../../cuentas/infrastructure/persistence/ensure-creditor-for-cliente.js";
+import { CuentasPrismaRepository } from "../../../cuentas/infrastructure/persistence/cuentas-prisma.repository.js";
+import { listarTutelasParaInformeCliente } from "../../../tutelas/infrastructure/persistence/tutelas-prisma.repository.js";
+
+const portalUsuarioSelect = {
+  activated_at: true,
+  is_active: true,
+  activation_expires_at: true,
+} as const;
+
+function withPortalStatus<T extends { id: string }>(
+  cliente: T,
+  usuarios: Array<{
+    activated_at: Date | null;
+    is_active: boolean;
+    activation_expires_at: Date | null;
+  }>,
+) {
+  return {
+    ...cliente,
+    portal_status: deriveClientePortalStatus(usuarios[0] ?? null),
+  };
+}
 
 const portalUsuarioSelect = {
   activated_at: true,
@@ -67,6 +89,7 @@ clientesRouter.use(requireAuth);
 const emailSender = new NodemailerGmailEmailSender();
 const createClienteUseCase = new CreateClienteUseCase({ emailSender });
 const resendClienteInvitationUseCase = new ResendClienteInvitationUseCase({ emailSender });
+const cuentasRepo = new CuentasPrismaRepository();
 
 clientesRouter.get("/", requireStaff(), async (req, res, next) => {
   try {
@@ -185,11 +208,17 @@ clientesRouter.patch("/:id", requireOwnershipOrStaff("id"), async (req, res, nex
 
 clientesRouter.get("/:id/cuentas", requireOwnershipOrStaff("id"), async (req, res, next) => {
   try {
-    const items = await prisma.cuenta.findMany({
-      where: { cliente_id: req.params.id, deleted_at: null },
-      orderBy: { created_at: "desc" },
-    });
+    // Mismo mapper que GET /cuentas y GET /cuentas/:id: incluye deudores[] completo.
+    const items = await cuentasRepo.listCuentas({ cliente_id: req.params.id });
     res.json({ items });
+  } catch (error) {
+    next(error);
+  }
+});
+
+clientesRouter.get("/:id/tutelas", requireOwnershipOrStaff("id"), async (req, res, next) => {
+  try {
+    res.json({ items: await listarTutelasParaInformeCliente(req.params.id) });
   } catch (error) {
     next(error);
   }

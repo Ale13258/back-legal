@@ -90,6 +90,21 @@ enum EtapaProceso {
   @@map("etapa_proceso_enum")
 }
 
+enum EtapaTutela {
+  radicacion
+  admision
+  inadmision
+  requerimiento
+  sentencia
+  impugnacion
+  desacato
+  admite_impugnacion
+  otro
+  finalizada
+
+  @@map("etapa_tutela_enum")
+}
+
 model Cliente {
   id            String      @id @default(uuid())
   nombre        String
@@ -104,11 +119,96 @@ model Cliente {
   cuentas   Cuenta[]
   creditors Creditor[]
   usuarios  Usuario[]
+  deudores  Deudor[]
+  tutelas   Tutela[]
 
   created_at DateTime @default(now())
   updated_at DateTime @updatedAt
 
   @@map("clientes")
+}
+
+/// Acción de tutela en seguimiento por el equipo interno; alerta por correo al staff antes de vencer.
+model Tutela {
+  id               String      @id @default(uuid())
+  cliente_id       String?
+  cliente          Cliente?    @relation(fields: [cliente_id], references: [id])
+  fecha_radicacion DateTime?   @db.Date
+  radicado         String?
+  juzgado          String?
+  accionante       String
+  accionado        String
+  derecho          String      @default("PETICION")
+  vencimiento      DateTime?   @db.Date
+  etapa            EtapaTutela @default(radicacion)
+  /// Día en que la tutela entró a la etapa actual; base del término (salvo SENTENCIA: radicación).
+  fecha_etapa      DateTime?   @db.Date
+  observaciones    String?
+  /// Nota corta visible en el correo de alerta.
+  nota             String?
+
+  alerta_por_vencer_enviada_at DateTime?
+  alerta_vencida_enviada_at    DateTime?
+
+  /// Soft delete: la fila se conserva para trazabilidad; `deleted_by` = email de quien la eliminó.
+  deleted_at DateTime?
+  deleted_by String?
+  created_at DateTime  @default(now())
+  updated_at DateTime  @updatedAt
+
+  @@index([cliente_id], map: "idx_tutelas_cliente")
+  @@index([vencimiento], map: "idx_tutelas_vencimiento")
+  @@map("tutelas")
+}
+
+/// Derechos de petición / PQR radicados ante entidades (seguimiento interno).
+model Pqr {
+  id               String    @id @default(uuid())
+  /// Legacy: iniciales importadas del Excel (AO, NB…). El responsable real es `responsable_id`.
+  gestion          String?
+  /// Usuario del staff que lleva la PQR.
+  responsable_id   String?
+  responsable      Usuario?  @relation(fields: [responsable_id], references: [id])
+  solicitante      String
+  entidad          String
+  asunto           String
+  fecha_radicacion DateTime  @db.Date
+  radicado         String?
+  /// Por defecto 15 días hábiles desde la radicación; editable.
+  vencimiento      DateTime? @db.Date
+  estado           String?
+  /// Cerrada: respondida o sin trámite pendiente; no genera más alertas.
+  cerrada          Boolean   @default(false)
+
+  alerta_por_vencer_enviada_at DateTime?
+  alerta_vencida_enviada_at    DateTime?
+
+  /// Soft delete: la fila se conserva para trazabilidad; `deleted_by` = email de quien la eliminó.
+  deleted_at DateTime?
+  deleted_by String?
+  created_at DateTime  @default(now())
+  updated_at DateTime  @updatedAt
+
+  @@index([vencimiento], map: "idx_pqrs_vencimiento")
+  @@index([responsable_id], map: "idx_pqrs_responsable")
+  @@map("pqrs")
+}
+
+/// Trazabilidad de tutelas y PQR: cada alta, cambio o eliminación con sus valores antes/después.
+model HistorialCambio {
+  id            String   @id @default(uuid())
+  /// "tutela" | "pqr"
+  entidad       String
+  registro_id   String
+  /// "creada" | "actualizada" | "eliminada"
+  accion        String
+  /// [{ campo, antes, despues }]
+  cambios       Json
+  usuario_email String?
+  created_at    DateTime @default(now())
+
+  @@index([entidad, registro_id, created_at], map: "idx_historial_registro")
+  @@map("historial_cambios")
 }
 
 /// Acreedor (cliente del cliente SaaS): entrega cartera a cobrar.
@@ -149,6 +249,7 @@ model Usuario {
   activated_at           DateTime?
 
   refresh_tokens RefreshToken[]
+  pqrs           Pqr[]
 
   created_at DateTime @default(now())
   updated_at DateTime @updatedAt
@@ -173,9 +274,12 @@ model Cuenta {
   cobro_nombre       String
   cobro_tipo_persona TipoPersona
   cobro_documento    String
-  cobro_email        String
+  cobro_email        String?
 
   monto_a_la_fecha Decimal @default(0) @db.Decimal(14, 2)
+
+  /// Honorarios negociados (override). Null = usar % sugerido en front según etapa.
+  honorarios_monto Decimal? @db.Decimal(14, 2)
 
   edad_mora_dias Int?
   fecha_inicio_cobro DateTime? @db.Date
@@ -197,19 +301,25 @@ model Cuenta {
   @@map("cuentas")
 }
 
-/// Persona/entidad a quien se cobra (no pertenece al Cliente).
+/// Persona/entidad a quien se cobra. Aislado por conjunto (`cliente_id`):
+/// no se reutiliza el mismo deudor entre clientes distintos.
 model Deudor {
   id           String      @id @default(uuid())
+  cliente_id   String
+  cliente      Cliente     @relation(fields: [cliente_id], references: [id])
   nombre       String
   tipo_persona TipoPersona
-  documento    String      @unique
+  documento    String
   emails       String[]
+  telefono     String?
 
   cuentas CuentaDeudor[]
 
   created_at DateTime @default(now())
   updated_at DateTime @updatedAt
 
+  @@index([cliente_id], map: "idx_deudores_cliente_id")
+  @@index([cliente_id, documento], map: "idx_deudores_cliente_documento")
   @@map("deudores")
 }
 
@@ -260,7 +370,10 @@ model ProcesoLegal {
   cuenta_id String
   cuenta    Cuenta @relation(fields: [cuenta_id], references: [id])
 
-  numero_cuenta String              @unique
+  /// Unicidad entre filas vivas: índice SQL parcial
+  /// `procesos_legales_numero_cuenta_active_key` (WHERE deleted_at IS NULL).
+  /// Prisma no modela UNIQUE parcial; no reponer `@unique` o migrate recrea el global.
+  numero_cuenta String
   tipo          TipoProcesoLegal
   estado        EstadoProcesoLegal
   etapa_proceso EtapaProceso

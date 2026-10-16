@@ -14,10 +14,28 @@ export class ApiError extends Error {
     details?: unknown,
   ) {
     super(message);
+    this.name = "ApiError";
     this.status = status;
     this.code = code;
     this.details = details;
   }
+}
+
+/** Duck-typing: el bundle de Vercel puede romper `instanceof` entre chunks. */
+export function isApiErrorLike(err: unknown): err is ApiError {
+  if (!err || typeof err !== "object") return false;
+  const candidate = err as {
+    name?: unknown;
+    status?: unknown;
+    code?: unknown;
+    message?: unknown;
+  };
+  return (
+    (candidate.name === "ApiError" || typeof candidate.status === "number") &&
+    typeof candidate.status === "number" &&
+    typeof candidate.code === "string" &&
+    typeof candidate.message === "string"
+  );
 }
 
 export function notFoundHandler(
@@ -49,11 +67,13 @@ export function errorHandler(
     });
   }
 
-  if (err instanceof ApiError) {
-    return res.status(err.status).json({
-      code: err.code,
-      message: err.message,
-      details: err.details,
+  // En Vercel el bundle puede romper `instanceof ApiError` entre módulos.
+  if (err instanceof ApiError || isApiErrorLike(err)) {
+    const apiErr = err as ApiError;
+    return res.status(apiErr.status).json({
+      code: apiErr.code,
+      message: apiErr.message,
+      details: apiErr.details,
       request_id: req.requestId ?? "unknown",
     });
   }

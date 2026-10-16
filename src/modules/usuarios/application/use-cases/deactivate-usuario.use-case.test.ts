@@ -36,6 +36,7 @@ function createPersistence(
         is_active: input.is_active === false ? false : true,
         status: input.is_active === false ? "inactive" : "active",
       }),
+    deleteStaff: async () => true,
     countActiveSuperAdmins: async () => 1,
     revokeAllRefreshTokens: async () => {},
     ...overrides,
@@ -60,12 +61,12 @@ describe("DeactivateUsuarioUseCase", () => {
     );
   });
 
-  it("rechaza desactivar al ultimo super_admin activo", async () => {
+  it("rechaza desactivar a cualquier super_admin", async () => {
     const revoked: string[] = [];
     const useCase = new DeactivateUsuarioUseCase({
       usuariosPersistence: createPersistence({
         findStaffById: async () => staff({ id: "sa-1", role: "super_admin" }),
-        countActiveSuperAdmins: async () => 1,
+        countActiveSuperAdmins: async () => 2,
         updateStaff: async () => {
           throw new Error("no debe actualizar");
         },

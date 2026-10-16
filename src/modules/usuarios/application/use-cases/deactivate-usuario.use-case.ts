@@ -22,19 +22,16 @@ export class DeactivateUsuarioUseCase {
       throw new ApiError(404, "NOT_FOUND", "Usuario no encontrado");
     }
 
-    if (!existing.is_active) {
-      return existing;
+    if (existing.role === "super_admin") {
+      throw new ApiError(
+        400,
+        "BUSINESS_RULE_VIOLATION",
+        "No se puede desactivar a un super_admin",
+      );
     }
 
-    if (existing.role === "super_admin") {
-      const activeSuperAdmins = await this.deps.usuariosPersistence.countActiveSuperAdmins();
-      if (activeSuperAdmins <= 1) {
-        throw new ApiError(
-          400,
-          "BUSINESS_RULE_VIOLATION",
-          "No se puede desactivar al ultimo super_admin activo",
-        );
-      }
+    if (!existing.is_active) {
+      return existing;
     }
 
     const updated = await this.deps.usuariosPersistence.updateStaff(input.id, {

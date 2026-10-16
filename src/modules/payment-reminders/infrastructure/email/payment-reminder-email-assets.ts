@@ -37,6 +37,10 @@ function readAssetAttachment(filename: string, cid: string) {
   };
 }
 
+export function getLegaltechLogoAttachment() {
+  return readAssetAttachment("legaltech-logo.png", PAYMENT_REMINDER_LOGO_CID);
+}
+
 /** Adjuntos embebidos (CID) para que Gmail muestre el correo como HTML, no como imagen remota. */
 export function getPaymentReminderEmailAttachments(): {
   filename: string;

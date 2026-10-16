@@ -1,4 +1,5 @@
 import type { Prisma } from "@prisma/client";
+import { listarHistorial } from "../../../../shared/infrastructure/historial/historial-cambios.js";
 import { prisma } from "../../../../shared/infrastructure/prisma/prisma.client.js";
 import { STAFF_ROLES } from "../../../../shared/security/roles.js";
 import type {
@@ -86,6 +87,42 @@ export class TutelasAlertaPrismaRepository implements TutelasAlertaRepository {
     const results = await prisma.$transaction(ops);
     return { claimed: results.reduce((n, r) => n + r.count, 0) };
   }
+}
+
+/** Campos internos que no salen en el informe del propietario. */
+const CAMPOS_INTERNOS_INFORME = new Set(["nota", "observaciones", "cliente_nombre"]);
+
+/** Tutelas del cliente para su informe: sin nota interna ni usuario que hizo cada cambio. */
+export async function listarTutelasParaInformeCliente(clienteId: string) {
+  const rows = await prisma.tutela.findMany({
+    where: { cliente_id: clienteId, deleted_at: null },
+    orderBy: [{ fecha_radicacion: { sort: "desc", nulls: "last" } }, { created_at: "desc" }],
+  });
+  const historial = await listarHistorial(
+    "tutela",
+    rows.map((r) => r.id),
+  );
+  return rows.map((row) => ({
+    id: row.id,
+    radicado: row.radicado,
+    juzgado: row.juzgado,
+    accionante: row.accionante,
+    accionado: row.accionado,
+    derecho: row.derecho,
+    etapa: row.etapa,
+    fecha_radicacion: ymdFromDate(row.fecha_radicacion),
+    fecha_etapa: ymdFromDate(row.fecha_etapa),
+    vencimiento: ymdFromDate(row.vencimiento),
+    created_at: row.created_at.toISOString(),
+    historial: historial
+      .filter((h) => h.registro_id === row.id)
+      .map((h) => ({
+        accion: h.accion,
+        created_at: h.created_at,
+        cambios: h.cambios.filter((c) => !CAMPOS_INTERNOS_INFORME.has(c.campo)),
+      }))
+      .filter((h) => h.accion !== "actualizada" || h.cambios.length > 0),
+  }));
 }
 
 /** `TUTELAS_ALERTA_EMAILS` (separados por coma) o, si no existe, todo el staff activo. */

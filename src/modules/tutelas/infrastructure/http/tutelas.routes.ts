@@ -1,9 +1,14 @@
-import { timingSafeEqual } from "node:crypto";
-import { Router, type Request } from "express";
+import { Router } from "express";
 import { ApiError } from "../../../../shared/http/error-handler.js";
 import { resolveOutboundFrom } from "../../../../shared/infrastructure/email/gmail-transport.js";
+import {
+  diffCampos,
+  listarHistorial,
+  registrarHistorial,
+} from "../../../../shared/infrastructure/historial/historial-cambios.js";
 import { prisma } from "../../../../shared/infrastructure/prisma/prisma.client.js";
 import { requireAuth, requireStaff } from "../../../../shared/security/auth.middleware.js";
+import { isCronAuthorized } from "../../../../shared/security/cron-auth.js";
 import { NodemailerGmailEmailSender } from "../../../payment-reminders/infrastructure/email/nodemailer-gmail.sender.js";
 import {
   PAYMENT_REMINDER_LOGO_CID,
@@ -22,12 +27,15 @@ import {
 } from "../persistence/tutelas-prisma.repository.js";
 import { createTutelaSchema, patchTutelaSchema } from "./tutelas.schemas.js";
 
-const TUTELAS_APP_URL_PRODUCCION = "https://legal-angular2-prod.web.app";
+const TUTELAS_APP_URL_PRODUCCION = "https://app.abogadosdigitales.com.co";
 
-/** El correo siempre abre producción, aunque se envíe desde un backend local. */
+/** Los correos de alerta siempre abren producción, aunque se envíen desde un backend local. */
+export function resolveAlertasAppUrl(): string {
+  return (process.env.TUTELAS_APP_URL?.trim() || TUTELAS_APP_URL_PRODUCCION).replace(/\/+$/, "");
+}
+
 export function resolveTutelasLinks(): { label: string; url: string }[] {
-  const app = (process.env.TUTELAS_APP_URL?.trim() || TUTELAS_APP_URL_PRODUCCION).replace(/\/+$/, "");
-  return [{ label: "Abrir tutelas en LegalTech", url: `${app}/tutelas` }];
+  return [{ label: "Abrir tutelas en LegalTech", url: `${resolveAlertasAppUrl()}/tutelas` }];
 }
 
 const alertaRepo = new TutelasAlertaPrismaRepository();
@@ -44,14 +52,6 @@ const enviarAlertas = new EnviarAlertasTutelasUseCase({
   tutelasLinks: resolveTutelasLinks,
 });
 
-function isCronAuthorized(req: Request): boolean {
-  const secret = process.env.CRON_SECRET?.trim();
-  if (!secret) return false;
-  const expected = Buffer.from(`Bearer ${secret}`);
-  const received = Buffer.from(req.header("authorization") ?? "");
-  return received.length === expected.length && timingSafeEqual(received, expected);
-}
-
 async function assertClienteExiste(clienteId: string | null | undefined): Promise<void> {
   if (!clienteId) return;
   const cliente = await prisma.cliente.findUnique({ where: { id: clienteId }, select: { id: true } });
@@ -59,10 +59,25 @@ async function assertClienteExiste(clienteId: string | null | undefined): Promis
 }
 
 async function findTutelaActiva(id: string) {
-  const row = await prisma.tutela.findFirst({ where: { id, deleted_at: null } });
+  const row = await prisma.tutela.findFirst({ where: { id, deleted_at: null }, include: tutelaInclude });
   if (!row) throw new ApiError(404, "NOT_FOUND", "Tutela no encontrada");
   return row;
 }
+
+/** Campos de la respuesta que quedan en la trazabilidad. */
+const CAMPOS_HISTORIAL_TUTELA = [
+  "fecha_radicacion",
+  "radicado",
+  "juzgado",
+  "accionante",
+  "accionado",
+  "derecho",
+  "cliente_nombre",
+  "etapa",
+  "fecha_etapa",
+  "vencimiento",
+  "nota",
+] as const;
 
 export const tutelasRouter = Router();
 
@@ -93,6 +108,14 @@ tutelasRouter.get("/", async (_req, res, next) => {
   }
 });
 
+tutelasRouter.get("/:id/historial", async (req, res, next) => {
+  try {
+    res.json({ items: await listarHistorial("tutela", [req.params.id]) });
+  } catch (error) {
+    next(error);
+  }
+});
+
 tutelasRouter.post("/", async (req, res, next) => {
   try {
     const dto = createTutelaSchema.parse(req.body);
@@ -110,24 +133,35 @@ tutelasRouter.post("/", async (req, res, next) => {
         ? dto.vencimiento
         : calcularVencimientoEtapa({ etapa, fecha_etapa: fechaEtapa, fecha_radicacion: fechaRadicacion });
 
-    const row = await prisma.tutela.create({
-      data: {
-        cliente_id: dto.cliente_id ?? null,
-        fecha_radicacion: dateFromYmd(dto.fecha_radicacion ?? null),
-        radicado: dto.radicado ?? null,
-        juzgado: dto.juzgado ?? null,
-        accionante: dto.accionante,
-        accionado: dto.accionado,
-        derecho: dto.derecho ?? "PETICION",
-        vencimiento: dateFromYmd(vencimiento),
-        etapa,
-        fecha_etapa: dateFromYmd(fechaEtapa),
-        observaciones: dto.observaciones ?? null,
-        nota: dto.nota ?? null,
-      },
-      include: tutelaInclude,
+    const creada = await prisma.$transaction(async (tx) => {
+      const row = await tx.tutela.create({
+        data: {
+          cliente_id: dto.cliente_id ?? null,
+          fecha_radicacion: dateFromYmd(dto.fecha_radicacion ?? null),
+          radicado: dto.radicado ?? null,
+          juzgado: dto.juzgado ?? null,
+          accionante: dto.accionante,
+          accionado: dto.accionado,
+          derecho: dto.derecho ?? "PETICION",
+          vencimiento: dateFromYmd(vencimiento),
+          etapa,
+          fecha_etapa: dateFromYmd(fechaEtapa),
+          observaciones: dto.observaciones ?? null,
+          nota: dto.nota ?? null,
+        },
+        include: tutelaInclude,
+      });
+      const response = toTutelaResponse(row);
+      await registrarHistorial(tx, {
+        entidad: "tutela",
+        registro_id: row.id,
+        accion: "creada",
+        cambios: diffCampos(null, response, CAMPOS_HISTORIAL_TUTELA),
+        usuario_email: req.user?.email,
+      });
+      return response;
     });
-    res.status(201).json(toTutelaResponse(row));
+    res.status(201).json(creada);
   } catch (error) {
     next(error);
   }
@@ -159,28 +193,39 @@ tutelasRouter.patch("/:id", async (req, res, next) => {
     const vencimientoCambia =
       vencimiento !== undefined && vencimiento !== ymdFromDate(current.vencimiento);
 
-    const row = await prisma.tutela.update({
-      where: { id: current.id },
-      data: {
-        cliente_id: dto.cliente_id,
-        fecha_radicacion: dateFromYmd(dto.fecha_radicacion),
-        radicado: dto.radicado,
-        juzgado: dto.juzgado,
-        accionante: dto.accionante,
-        accionado: dto.accionado,
-        derecho: dto.derecho,
-        vencimiento: dateFromYmd(vencimiento),
-        etapa: dto.etapa,
-        fecha_etapa: dateFromYmd(fechaEtapa),
-        observaciones: dto.observaciones,
-        nota: dto.nota,
-        ...(vencimientoCambia
-          ? { alerta_por_vencer_enviada_at: null, alerta_vencida_enviada_at: null }
-          : {}),
-      },
-      include: tutelaInclude,
+    const actualizada = await prisma.$transaction(async (tx) => {
+      const row = await tx.tutela.update({
+        where: { id: current.id },
+        data: {
+          cliente_id: dto.cliente_id,
+          fecha_radicacion: dateFromYmd(dto.fecha_radicacion),
+          radicado: dto.radicado,
+          juzgado: dto.juzgado,
+          accionante: dto.accionante,
+          accionado: dto.accionado,
+          derecho: dto.derecho,
+          vencimiento: dateFromYmd(vencimiento),
+          etapa: dto.etapa,
+          fecha_etapa: dateFromYmd(fechaEtapa),
+          observaciones: dto.observaciones,
+          nota: dto.nota,
+          ...(vencimientoCambia
+            ? { alerta_por_vencer_enviada_at: null, alerta_vencida_enviada_at: null }
+            : {}),
+        },
+        include: tutelaInclude,
+      });
+      const response = toTutelaResponse(row);
+      await registrarHistorial(tx, {
+        entidad: "tutela",
+        registro_id: row.id,
+        accion: "actualizada",
+        cambios: diffCampos(toTutelaResponse(current), response, CAMPOS_HISTORIAL_TUTELA),
+        usuario_email: req.user?.email,
+      });
+      return response;
     });
-    res.json(toTutelaResponse(row));
+    res.json(actualizada);
   } catch (error) {
     next(error);
   }
@@ -190,9 +235,18 @@ tutelasRouter.patch("/:id", async (req, res, next) => {
 tutelasRouter.delete("/:id", async (req, res, next) => {
   try {
     const current = await findTutelaActiva(req.params.id);
-    await prisma.tutela.update({
-      where: { id: current.id },
-      data: { deleted_at: new Date(), deleted_by: req.user?.email ?? null },
+    await prisma.$transaction(async (tx) => {
+      await tx.tutela.update({
+        where: { id: current.id },
+        data: { deleted_at: new Date(), deleted_by: req.user?.email ?? null },
+      });
+      await registrarHistorial(tx, {
+        entidad: "tutela",
+        registro_id: current.id,
+        accion: "eliminada",
+        cambios: [],
+        usuario_email: req.user?.email,
+      });
     });
     res.status(204).send();
   } catch (error) {

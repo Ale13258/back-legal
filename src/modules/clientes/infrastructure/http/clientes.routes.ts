@@ -15,6 +15,7 @@ import {
   LEGALTECH_TENANT_EMAIL,
 } from "../../../cuentas/infrastructure/persistence/ensure-creditor-for-cliente.js";
 import { CuentasPrismaRepository } from "../../../cuentas/infrastructure/persistence/cuentas-prisma.repository.js";
+import { listarTutelasParaInformeCliente } from "../../../tutelas/infrastructure/persistence/tutelas-prisma.repository.js";
 
 const portalUsuarioSelect = {
   activated_at: true,
@@ -190,6 +191,14 @@ clientesRouter.get("/:id/cuentas", requireOwnershipOrStaff("id"), async (req, re
     // Mismo mapper que GET /cuentas y GET /cuentas/:id: incluye deudores[] completo.
     const items = await cuentasRepo.listCuentas({ cliente_id: req.params.id });
     res.json({ items });
+  } catch (error) {
+    next(error);
+  }
+});
+
+clientesRouter.get("/:id/tutelas", requireOwnershipOrStaff("id"), async (req, res, next) => {
+  try {
+    res.json({ items: await listarTutelasParaInformeCliente(req.params.id) });
   } catch (error) {
     next(error);
   }
